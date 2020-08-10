@@ -1,0 +1,204 @@
+image: docker:18.09.7
+
+variables:
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_DRIVER: overlay2
+  IMAGE_NAME: emcmongoose/mongoose-storage-driver-pravega
+  IMAGE_FILE_NAME: build/mongoose-storage-driver-pravega.tar
+  JAVA_HOME: /opt/jdk-11.0.4+10
+  ROBOTEST_CONTAINER_WORKING_DIR: /root/mongoose
+  SERVICE_HOST: 127.0.0.1
+
+services:
+  - docker:18.09.7-dind
+
+stages:
+  - build
+  - test # unit/integration tests
+  - build_docker_image
+  - test_functional # functional containerized tests
+  - deploy
+
+before_script:
+  # install AdoptOpenJDK 11
+  - apk add --update --no-cache ca-certificates curl openssl binutils xz gnupg busybox-extras git bash
+  - curl -Lks https://github.com/AdoptOpenJDK/openjdk11-binaries/releases/download/jdk11u-2019-08-21-12-17/OpenJDK11U-jdk_x64_linux_hotspot_2019-08-21-12-17.tar.gz -o /tmp/jdk11.tgz
+  - tar xvf /tmp/jdk11.tgz -C /opt
+  - rm -rf /tmp/jdk11.tgz
+  - export PATH=${PATH}:${JAVA_HOME}/bin
+  - export GLIBC_VER="2.28-r0"
+  - export ALPINE_GLIBC_REPO="https://github.com/sgerrand/alpine-pkg-glibc/releases/download"
+  - export GCC_LIBS_URL="https://archive.archlinux.org/packages/g/gcc-libs/gcc-libs-8.3.0-1-x86_64.pkg.tar.xz"
+  - export GCC_LIBS_SHA256=400e2ecb1b2dfb40e09cdb6805f0075cbc88e6fcef9b73f23c64a6e709dcd61b
+  - export ZLIB_URL="https://archive.archlinux.org/packages/z/zlib/zlib-1%3A1.2.11-3-x86_64.pkg.tar.xz"
+  - export ZLIB_SHA256=17aede0b9f8baa789c5aa3f358fbf8c68a5f1228c5e6cba1a5dd34102ef4d4e5
+  - curl -Lks https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub -o /etc/apk/keys/sgerrand.rsa.pub
+  - curl -Lks ${ALPINE_GLIBC_REPO}/${GLIBC_VER}/glibc-${GLIBC_VER}.apk > /tmp/${GLIBC_VER}.apk
+  - apk add --allow-untrusted /tmp/${GLIBC_VER}.apk
+  - curl -Lks ${GCC_LIBS_URL} -o /tmp/gcc-libs.tar.xz
+  - echo "${GCC_LIBS_SHA256}  /tmp/gcc-libs.tar.xz" | sha256sum -c -
+  - mkdir /tmp/gcc
+  - tar -xf /tmp/gcc-libs.tar.xz -C /tmp/gcc
+  - mv /tmp/gcc/usr/lib/libgcc* /tmp/gcc/usr/lib/libstdc++* /usr/glibc-compat/lib
+  - strip /usr/glibc-compat/lib/libgcc_s.so.* /usr/glibc-compat/lib/libstdc++.so*
+  - curl -Lks ${ZLIB_URL} -o /tmp/libz.tar.xz
+  - echo "${ZLIB_SHA256}  /tmp/libz.tar.xz" | sha256sum -c -
+  - mkdir /tmp/libz
+  - tar -xf /tmp/libz.tar.xz -C /tmp/libz
+  - mv /tmp/libz/usr/lib/libz.so* /usr/glibc-compat/lib
+  - apk del binutils
+  - rm -rf /tmp/${GLIBC_VER}.apk /tmp/gcc /tmp/gcc-libs.tar.xz /tmp/libz /tmp/libz.tar.xz /var/cache/apk/*
+
+build:
+  stage: build
+  script:
+    - ./gradlew clean jar
+  tags:
+    - pravega
+  artifacts:
+    paths:
+      - build/libs/mongoose-*.jar
+
+test_unit:
+  stage: test
+  script:
+    - ./gradlew clean test
+  tags:
+    - pravega
+  artifacts:
+    paths:
+      - build/reports/tests/test/*
+    when: on_failure
+
+test_integration:
+  stage: test
+  script:
+    - ./gradlew pravegaExtract
+    - nohup build/pravega_/bin/pravega-standalone 1,2 > build/pravega_nohup.out &
+    - sleep 15
+    - ./gradlew integrationTest
+  tags:
+    - pravega
+  after_script:
+    - killall java
+  artifacts:
+    paths:
+      - build/pravega_nohup.out
+      - build/reports/tests/integrationTest/*
+    when: on_failure
+
+build_docker_image:
+  stage: build_docker_image
+  script:
+    - ./gradlew dockerBuildImage
+    - export VERSION=$(cat build.gradle | grep version\ = | sed -n 's/.*\([0-9]\+\.[0-9]\+\.[0-9]\+\).*/\1/p')
+    - docker save ${IMAGE_NAME}:${VERSION} > ${IMAGE_FILE_NAME}
+  tags:
+    - pravega
+  artifacts:
+    paths:
+      - ${IMAGE_FILE_NAME}
+
+.test_robot:
+  stage: test_functional
+  variables:
+    HOST_WORKING_DIR: ${CI_PROJECT_DIR}
+    PYTHONPATH: ${PYTHONPATH}:/usr/lib/python2.7/site-packages:src/test/robot/lib
+  script:
+    # Install robotframework and keyword libs
+    - apk add --no-cache --update python py-pip
+    - pip install -U virtualenv
+    - pip install -U requests
+    - pip install -U robotframework
+    - pip install -U robotframework-requests
+    - pip install -U robotframework-csvlibrary
+    # Load the testing docker image
+    - export BASE_VERSION=$(cat build.gradle | grep mongooseBase  | sed -n 's/.*\([0-9]\+\.[0-9]\+\.[0-9]\+\).*/\1/p')
+    - export VERSION=$(cat build.gradle | grep version\ = | sed -n 's/.*\([0-9]\+\.[0-9]\+\.[0-9]\+\).*/\1/p')
+    - docker login -u ${DOCKER_USER} -p ${DOCKER_PASS}
+    - docker load < ${IMAGE_FILE_NAME}
+    # Run Pravega
+    #- ./gradlew pravegaExtract
+    #- nohup build/pravega_/bin/pravega-standalone 1,2 > build/pravega_nohup.out &
+    - docker run -d -e HOST_IP=${SERVICE_HOST} -p 9090:9090 -p 12345:12345 pravega/pravega:0.7.0 standalone
+    - sleep 15
+    # Run the tests
+    - robot --outputdir build/robotest --suite ${SUITE} --include ${TEST} src/test/robot
+  tags:
+    - pravega
+  after_script:
+    - killall java
+    - rebot build/robotest/output.xml
+  artifacts:
+    paths:
+      - build/pravega_nohup.out
+      - build/robotest/*.html
+    when: on_failure
+
+test_create_event_stream:
+  extends: .test_robot
+  variables:
+    SUITE: api.storage
+    TEST: create_event_stream
+
+test_create_byte_streams:
+  extends: .test_robot
+  variables:
+    SUITE: api.storage
+    TEST: create_byte_streams
+
+test_read_event_streams:
+  extends: .test_robot
+  variables:
+    SUITE: api.storage
+    TEST: read_event_streams
+
+#test_read_byte_streams:
+#  extends: .test_robot
+#  variables:
+#    SUITE: api.storage
+#    TEST: read_byte_streams
+
+#test_read_all_byte_streams:
+#  extends: .test_robot
+#  variables:
+#    SUITE: api.storage
+#    TEST: read_all_byte_streams
+
+test_create_event_transaction_stream:
+  extends: .test_robot
+  variables:
+    SUITE: api.storage
+    TEST: create_event_transaction_stream
+
+release_to_maven_repo:
+  stage: deploy
+  script:
+    - if [ ! -z "$GPG_SECRET_KEYS" ]; then echo $GPG_SECRET_KEYS | base64 -d | gpg --import --batch; fi
+    - if [ ! -z "$GPG_OWNERTRUST" ]; then echo $GPG_OWNERTRUST | base64 -d | gpg --import-ownertrust --batch; fi
+    - mkdir /tmp/.gnupg
+    - if [ ! -z "$GPG_SECRING" ]; then echo $GPG_SECRING | base64 -d > /tmp/.gnupg/secring.gpg; fi
+    - ./gradlew clean jar
+    - ./gradlew -Psigning.keyId=${SIGNING_KEY_ID} -Psigning.password=${SIGNING_PASSWORD} -Psigning.secretKeyRingFile=/tmp/.gnupg/secring.gpg -PossrhUsername=${OSSRH_USERNAME} -PossrhPassword=${OSSRH_PASSWORD} publishToNexus closeAndReleaseRepository
+  tags:
+    - pravega
+  only:
+    - latest
+  except:
+    - branches
+
+release_to_docker_hub:
+  stage: deploy
+  tags:
+    - pravega
+  script:
+    - docker login -u ${DOCKER_USER} -p ${DOCKER_PASS}
+    - docker load < ${IMAGE_FILE_NAME}
+    - export VERSION=$(cat build.gradle | grep version\ = | sed -n 's/.*\([0-9]\+\.[0-9]\+\.[0-9]\+\).*/\1/p')
+    - docker push ${IMAGE_NAME}:${VERSION}
+    - docker tag ${IMAGE_NAME}:${VERSION} ${IMAGE_NAME}:latest
+    - docker push ${IMAGE_NAME}:latest
+  only:
+    - latest
+  except:
+    - branches
