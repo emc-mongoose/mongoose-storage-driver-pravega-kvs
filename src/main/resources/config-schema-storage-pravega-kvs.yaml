@@ -4,7 +4,7 @@ storage:
     control:
       scope: boolean
       timeoutMillis: long
-    event:
+    hashing:
       key:
         enabled: boolean
         count: long
