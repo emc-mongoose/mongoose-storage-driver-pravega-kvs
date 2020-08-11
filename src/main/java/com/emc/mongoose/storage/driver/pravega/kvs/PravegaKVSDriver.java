@@ -27,7 +27,6 @@ import com.emc.mongoose.base.storage.Credential;
 import com.emc.mongoose.storage.driver.coop.CoopStorageDriverBase;
 import com.emc.mongoose.base.item.op.Operation.Status;
 
-
 import com.github.akurilov.commons.system.DirectMemUtil;
 import com.github.akurilov.confuse.Config;
 
@@ -57,6 +56,9 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 
+import io.pravega.client.ClientConfig;
+import io.pravega.client.admin.KeyValueTableManager;
+import io.pravega.client.admin.impl.KeyValueTableManagerImpl;
 import lombok.Value;
 import lombok.val;
 import org.apache.logging.log4j.Level;
@@ -78,6 +80,18 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     // caches allowing the lazy creation of the necessary things:
     // * endpoints
     private final Map<String, URI> endpointCache = new ConcurrentHashMap<>();
+
+    ClientConfig createClientConfig(final URI endpointUri) {
+        val maxConnPerSegStore = maxConnectionsPerSegmentstore;
+        val clientConfigBuilder = ClientConfig
+                .builder()
+                .controllerURI(endpointUri)
+                .maxConnectionsPerSegmentStore(maxConnPerSegStore);
+        /*if(null != cred) {
+            clientConfigBuilder.credentials(cred);
+        }*/
+        return clientConfigBuilder.build();
+    }
 
     PravegaKVSDriver(
             final String stepId,
@@ -202,7 +216,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
                     break;
                 case CREATE:
-
+                    writeKVP(op);
                     break;
                 case READ:
 
@@ -231,6 +245,13 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             }
         }
         return false;
+    }
+
+    private void writeKVP(O op) {
+        val nodeAddr = op.nodeAddr();
+        val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
+        ClientConfig clientConfig
+        KeyValueTableManagerImpl kvtManager = new KeyValueTableManagerImpl(endpointUri);
     }
 
     @Override
