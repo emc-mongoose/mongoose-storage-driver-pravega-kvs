@@ -1,0 +1,30 @@
+---
+storage:
+  driver:
+    control:
+      scope: boolean
+      timeoutMillis: long
+    hashing:
+      key:
+        enabled: boolean
+        count: long
+  namespace: string
+  net:
+    bindBacklogSize: int
+    interestOpQueued: boolean
+    keepAlive: boolean
+    linger: int
+    maxConnPerSegmentstore: int
+    reuseAddr: boolean
+    rcvBuf: int
+    sndBuf: int
+    tcpNoDelay: boolean
+    timeoutMillis: int
+    ssl: boolean
+    uri:
+      schema: string
+    node:
+      addrs: list
+      port: int
+      conn:
+        attemptsLimit: int

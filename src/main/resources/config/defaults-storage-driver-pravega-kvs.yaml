@@ -1,0 +1,31 @@
+---
+storage:
+  driver:
+    control:
+      scope: true
+      timeoutMillis: 2000
+    hashing:
+      key:
+        enabled: false
+        count: 0
+  namespace: goose
+  net:
+    bindBacklogSize: 0
+    interestOpQueued: false
+    keepAlive: true
+    linger: 0
+    maxConnPerSegmentstore: 5
+    reuseAddr: true
+    rcvBuf: 0
+    sndBuf: 0
+    tcpNoDelay: true
+    timeoutMillis: 0
+    ssl: false
+    uri:
+      schema: tcp
+    node:
+      addrs:
+        - 127.0.0.1
+      port: 9090
+      conn:
+        attemptsLimit: 0
