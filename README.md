@@ -1,8 +1,7 @@
 [![Gitter chat](https://badges.gitter.im/emc-mongoose.png)](https://gitter.im/emc-mongoose)
-[![Issue Tracker](https://img.shields.io/badge/Issue-Tracker-red.svg)](https://mongoose-issues.atlassian.net/jira/software/c/projects/KVS/issues?filter=allissues)
-[![CI status](https://travis-ci.org/emc-mongoose/mongoose-storage-driver-pravega.svg?branch=master)](https://travis-ci.org/emc-mongoose/mongoose-storage-driver-pravega/builds)
+[![Issue Tracker](https://img.shields.io/badge/Issue-Tracker-orange.svg)](https://mongoose-issues.atlassian.net/jira/software/c/projects/KVS/issues?filter=allissues)
 [![Maven metadata URL](https://img.shields.io/maven-metadata/v/http/central.maven.org/maven2/com/github/emc-mongoose/mongoose-storage-driver-pravega/maven-metadata.xml.svg)](http://central.maven.org/maven2/com/github/emc-mongoose/mongoose-storage-driver-pravega-kvs)
-[![Docker Pulls](https://img.shields.io/docker/pulls/emcmongoose/mongoose-storage-driver-pravega.svg)](https://hub.docker.com/r/emcmongoose/mongoose-storage-driver-pravega/)
+[![Docker Pulls](https://img.shields.io/docker/pulls/emcmongoose/mongoose-storage-driver-pravega-kvs.svg)](https://hub.docker.com/r/emcmongoose/mongoose-storage-driver-pravega-kvs/)
 
 # Content
 
@@ -44,7 +43,7 @@ Mongoose and Pravega are using quite different concepts. So it's necessary to de
 |---------|----------|
 | [Key-Value Table](https://github.com/pravega/pravega/wiki/PDP-39-Key-Value-Tables) | *Item Path* or *Data Item* |
 | Scope | Storage Namespace
-| [Key-Value Pair](http://pravega.io/docs/latest/pravega-concepts/#events) | *Data Item* |
+| [Key-Value Pair](http://pravega.io/docs/latest/pravega-concepts/) | *Data Item* |
 | Table Segment (KVT Partition) | N/A |
 
 # 2. Features
@@ -61,8 +60,8 @@ Java 11+ is required to build/run.
 [maven repo](http://repo.maven.apache.org/maven2/com/github/emc-mongoose/mongoose-base/)
 and put it to your working directory. Note the particular version, which is referred as *BASE_VERSION* below.
 
-2. Get the latest `mongoose-storage-driver-preempt` jar from the
-[maven repo](http://repo.maven.apache.org/maven2/com/github/emc-mongoose/mongoose-storage-driver-preempt/)
+2. Get the latest `mongoose-storage-driver-coop` jar from the
+[maven repo](http://repo.maven.apache.org/maven2/com/github/emc-mongoose/mongoose-storage-driver-coop/)
 and put it to the `~/.mongoose/<BASE_VERSION>/ext` directory.
 
 3. Get the latest `mongoose-storage-driver-pravega-kvs` jar from the
@@ -142,7 +141,7 @@ This parameter can largely affect the performance, but it also increases network
 
 ### 4.2.2. Base Storage Driver Usage Warnings
 
-See the [design notes](https://github.com/emc-mongoose/mongoose-storage-driver-preempt#design)
+See the [design notes](https://github.com/emc-mongoose/mongoose-storage-driver-coop#design)
 
 # 5. Usage
 TBD

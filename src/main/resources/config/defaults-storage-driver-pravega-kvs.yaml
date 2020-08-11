@@ -4,7 +4,7 @@ storage:
     control:
       scope: true
       timeoutMillis: 2000
-    event:
+    hashing:
       key:
         enabled: false
         count: 0

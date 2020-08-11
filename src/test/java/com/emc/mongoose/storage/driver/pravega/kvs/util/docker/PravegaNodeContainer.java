@@ -16,7 +16,7 @@ public class PravegaNodeContainer
 
 	public static final int PORT = 9090;
 	private static final Logger LOG = Logger.getLogger(PravegaNodeContainer.class.getSimpleName());
-	private static final String IMAGE_NAME = "pravega/pravega:0.3.2";
+	private static final String IMAGE_NAME = "pravega/pravega:0.7.0";
 	private static final DockerClient DOCKER_CLIENT = DockerClientBuilder.getInstance().build();
 
 	private static String CONTAINER_ID = null;
