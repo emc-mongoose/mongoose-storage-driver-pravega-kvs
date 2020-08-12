@@ -13,6 +13,7 @@ import static com.emc.mongoose.base.item.op.Operation.Status.SUCC;
 import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.DRIVER_NAME;
 import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.MAX_BACKOFF_MILLIS;
 
+import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.MAX_KVP_VALUE;
 import static com.github.akurilov.commons.lang.Exceptions.throwUnchecked;
 
 import com.emc.mongoose.base.config.IllegalConfigurationException;
@@ -57,12 +58,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 
 import io.pravega.client.ClientConfig;
+import io.pravega.client.KeyValueTableFactory;
 import io.pravega.client.admin.KeyValueTableManager;
 import io.pravega.client.admin.impl.KeyValueTableManagerImpl;
+import io.pravega.client.stream.impl.UTF8StringSerializer;
+import io.pravega.client.tables.KeyValueTable;
+import io.pravega.client.tables.KeyValueTableClientConfiguration;
+import io.pravega.client.tables.KeyValueTableConfiguration;
 import lombok.Value;
 import lombok.val;
 import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.ThreadContext;
 
 public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         extends CoopStorageDriverBase<I, O> {
@@ -82,11 +87,10 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     private final Map<String, URI> endpointCache = new ConcurrentHashMap<>();
 
     ClientConfig createClientConfig(final URI endpointUri) {
-        val maxConnPerSegStore = maxConnectionsPerSegmentstore;
         val clientConfigBuilder = ClientConfig
                 .builder()
                 .controllerURI(endpointUri)
-                .maxConnectionsPerSegmentStore(maxConnPerSegStore);
+                .maxConnectionsPerSegmentStore(maxConnectionsPerSegmentstore);
         /*if(null != cred) {
             clientConfigBuilder.credentials(cred);
         }*/
@@ -118,8 +122,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val nodeConfig = netConfig.configVal("node");
         this.nodePort = nodeConfig.intVal("port");
         val endpointAddrList = nodeConfig.listVal("addrs");
-        val eventConfig = driverConfig.configVal("event");
-        val createRoutingKeysConfig = eventConfig.configVal("key");
+        val hashingConfig = driverConfig.configVal("hashing");
+        val createRoutingKeysConfig = hashingConfig.configVal("key");
         val createRoutingKeys = createRoutingKeysConfig.boolVal("enabled");
         val createRoutingKeysPeriod = createRoutingKeysConfig.longVal("count");
         this.routingKeyFunc = createRoutingKeys ? new RoutingKeyFunctionImpl<>(createRoutingKeysPeriod) : null;
@@ -216,8 +220,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
                     break;
                 case CREATE:
-                    writeKVP(op);
-                    break;
+                    return submitCreate(op);
                 case READ:
 
                     break;
@@ -247,11 +250,64 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         return false;
     }
 
-    private void writeKVP(O op) {
+    private boolean submitCreate(O op) {
         val nodeAddr = op.nodeAddr();
         val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
-        ClientConfig clientConfig
-        KeyValueTableManagerImpl kvtManager = new KeyValueTableManagerImpl(endpointUri);
+        val kvtName = extractKVTName(op.dstPath());
+        ClientConfig clientConfig = createClientConfig(endpointUri);
+        KeyValueTableManagerImpl kvtManager = new KeyValueTableManagerImpl(clientConfig);
+        KeyValueTableConfiguration kvtConfig = KeyValueTableConfiguration.builder()
+                .partitionCount(1) //TODO: partition count
+                .build();
+        kvtManager.createKeyValueTable(scopeName, kvtName, kvtConfig);
+        val factory = KeyValueTableFactory.withScope(scopeName, clientConfig);
+        KeyValueTable<String, String> kvt = factory.forKeyValueTable(kvtName, new UTF8StringSerializer(), new UTF8StringSerializer(),
+                KeyValueTableClientConfiguration.builder().build());
+
+        //KeyValueTableInfo kvtInfo = new KeyValueTableInfo(scopeName, kvtName);
+        try {
+            val kvpValueSize = op.item().size();
+            if (kvpValueSize > MAX_KVP_VALUE) {
+                failOperation(op, FAIL_IO);
+            } else if (kvpValueSize < 0) {
+                failOperation(op, FAIL_IO);
+            } else {
+                if (concurrencyThrottle.tryAcquire()) {
+                    op.startRequest();
+                    val kvtPutFuture = kvt.put(null, "a", "b"); // first parameter is key family
+                    try {
+                        op.finishRequest();
+                    } catch(final IllegalStateException ignored) {
+                    }
+                    kvtPutFuture.handle((version, thrown) -> handlePutFuture(op, thrown, kvpValueSize));
+                }
+            }
+        } catch (final IOException e) {
+            throw new AssertionError(e);
+        }
+        return true;
+    }
+
+    protected Object handlePutFuture(final O op, final Throwable thrown, final long transferSize) {
+        try {
+            if (null == thrown) {
+                op.startResponse();
+                op.finishResponse();
+                op.countBytesDone(transferSize);
+                op.status(SUCC);
+                handleCompleted(op);
+            } else {
+                failOperation(op, FAIL_UNKNOWN);
+            }
+        } finally {
+            concurrencyThrottle.release();
+        }
+        return null;
+    }
+
+    protected final void failOperation(final O op, final Status status) {
+        op.status(status);
+        handleCompleted(op);
     }
 
     @Override
@@ -262,6 +318,17 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     @Override
     protected int submit(List<O> ops) throws IllegalStateException {
         return 0;
+    }
+
+    static String extractKVTName(final String itemPath) {
+        String kvtName = itemPath;
+        if (kvtName.startsWith(SLASH)) {
+            kvtName = kvtName.substring(1);
+        }
+        if (kvtName.endsWith(SLASH) && kvtName.length() > 1) {
+            kvtName = kvtName.substring(0, kvtName.length() - 1);
+        }
+        return kvtName;
     }
 
     @Override
