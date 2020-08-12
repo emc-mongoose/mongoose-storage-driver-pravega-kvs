@@ -227,6 +227,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         return true;
     }
 
+
     private void readKVP(final O evtOp)
             throws IOException {
         evtOp.startRequest();
