@@ -4,8 +4,8 @@ import com.emc.mongoose.base.item.DataItem;
 import lombok.Value;
 
 @Value
-public class RoutingKeyFunctionImpl<I extends DataItem>
-				implements RoutingKeyFunction<I> {
+public class HashingKeyFunctionImpl<I extends DataItem>
+				implements HashingKeyFunction<I> {
 
 	long period;
 

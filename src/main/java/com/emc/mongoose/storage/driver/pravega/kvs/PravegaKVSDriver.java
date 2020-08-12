@@ -1,20 +1,5 @@
 package com.emc.mongoose.storage.driver.pravega.kvs;
 
-import static com.emc.mongoose.base.Exceptions.throwUncheckedIfInterrupted;
-import static com.emc.mongoose.base.item.op.OpType.NOOP;
-import static com.emc.mongoose.base.item.op.Operation.SLASH;
-import static com.emc.mongoose.base.item.op.Operation.Status.FAIL_IO;
-import static com.emc.mongoose.base.item.op.Operation.Status.FAIL_TIMEOUT;
-import static com.emc.mongoose.base.item.op.Operation.Status.FAIL_UNKNOWN;
-import static com.emc.mongoose.base.item.op.Operation.Status.INTERRUPTED;
-import static com.emc.mongoose.base.item.op.Operation.Status.PENDING;
-import static com.emc.mongoose.base.item.op.Operation.Status.RESP_FAIL_UNKNOWN;
-import static com.emc.mongoose.base.item.op.Operation.Status.SUCC;
-import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.DRIVER_NAME;
-import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.MAX_BACKOFF_MILLIS;
-
-import static com.github.akurilov.commons.lang.Exceptions.throwUnchecked;
-
 import com.emc.mongoose.base.config.IllegalConfigurationException;
 import com.emc.mongoose.base.data.DataInput;
 import com.emc.mongoose.base.item.DataItem;
@@ -25,42 +10,26 @@ import com.emc.mongoose.base.logging.LogUtil;
 import com.emc.mongoose.base.logging.Loggers;
 import com.emc.mongoose.base.storage.Credential;
 import com.emc.mongoose.storage.driver.coop.CoopStorageDriverBase;
-import com.emc.mongoose.base.item.op.Operation.Status;
-
-
-import com.github.akurilov.commons.system.DirectMemUtil;
 import com.github.akurilov.confuse.Config;
+import io.pravega.client.ClientConfig;
+import lombok.val;
+import org.apache.logging.log4j.Level;
 
 import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-
-import java.util.ServiceLoader;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
-
-import lombok.Value;
-import lombok.val;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.ThreadContext;
+import static com.emc.mongoose.base.Exceptions.throwUncheckedIfInterrupted;
+import static com.github.akurilov.commons.lang.Exceptions.throwUnchecked;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         extends CoopStorageDriverBase<I, O> {
@@ -71,7 +40,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     protected final int nodePort;
     protected final int maxConnectionsPerSegmentstore;
     protected final long controlApiTimeoutMillis;
-    private final RoutingKeyFunction<I> routingKeyFunc;
+    private final HashingKeyFunction<I> hashingKeyFunc;
     private final boolean controlScopeFlag;
     private final AtomicInteger rrc = new AtomicInteger(0);
 
@@ -104,11 +73,11 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val nodeConfig = netConfig.configVal("node");
         this.nodePort = nodeConfig.intVal("port");
         val endpointAddrList = nodeConfig.listVal("addrs");
-        val eventConfig = driverConfig.configVal("event");
-        val createRoutingKeysConfig = eventConfig.configVal("key");
-        val createRoutingKeys = createRoutingKeysConfig.boolVal("enabled");
-        val createRoutingKeysPeriod = createRoutingKeysConfig.longVal("count");
-        this.routingKeyFunc = createRoutingKeys ? new RoutingKeyFunctionImpl<>(createRoutingKeysPeriod) : null;
+        val hashingConfig = driverConfig.configVal("hashing");
+        val createHashingKeysConfig = hashingConfig.configVal("key");
+        val createHashingKeys = createHashingKeysConfig.boolVal("enabled");
+        val createHashingKeysPeriod = createHashingKeysConfig.longVal("count");
+        this.hashingKeyFunc = createHashingKeys ? new HashingKeyFunctionImpl<>(createHashingKeysPeriod) : null;
         this.endpointAddrs = endpointAddrList.toArray(new String[endpointAddrList.size()]);
         this.requestAuthTokenFunc = null; // do not use
         this.requestNewPathFunc = null; // do not use
@@ -116,6 +85,16 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
     }
 
+    ClientConfig createClientConfig(final URI endpointUri) {
+        val clientConfigBuilder = ClientConfig
+                .builder()
+                .controllerURI(endpointUri)
+                .maxConnectionsPerSegmentStore(maxConnectionsPerSegmentstore);
+        /*if(null != cred) {
+            clientConfigBuilder.credentials(cred);
+        }*/
+        return clientConfigBuilder.build();
+    }
 
     String nextEndpointAddr() {
         return endpointAddrs[rrc.getAndIncrement() % endpointAddrs.length];
