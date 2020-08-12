@@ -222,6 +222,70 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         return 0;
     }
 
+
+    private boolean submitRead(O op) {
+        return true;
+    }
+
+    private void readKVP(final O evtOp)
+            throws IOException {
+        evtOp.startRequest();
+        evtOp.finishRequest();
+
+        val kvtUtils = new KVTUtilsImpl("", "");
+        val kvtFactory = kvtUtils.createKVTFactory();
+        val kvTable = kvtUtils.createKVT(kvtFactory);
+
+        // read by key
+        val tableEntry = kvTable.get("", "");
+
+        // read by keys
+        val listTableEntries = kvTable.getAll("", null /*iterator*/);
+
+        // read by KF
+        val iterator = kvTable.entryIterator("" /*family*/, 1 /*maxBatchSize*/ , null /*state*/);
+
+        // -----------------------
+//        var evtRead_ = evtReader.readNextEvent(evtOpTimeoutMillis);
+//        while (evtRead_.isCheckpoint()) {
+//            Loggers.MSG.debug("{}: stream checkpoint @ position {}", stepId, evtRead_.getPosition());
+//            evtRead_ = evtReader.readNextEvent(evtOpTimeoutMillis);
+//        }
+//        evtOp.startResponse();
+//        evtOp.finishResponse();
+//        val evtRead = evtRead_;
+//        val evtData = evtRead.getEvent();
+//        if (e2eReadModeFlag) {
+//            val timestampBuffer = ByteBuffer.allocate(TIMESTAMP_LENGTH);
+//            timestampBuffer.put(evtData.array(), 0, TIMESTAMP_LENGTH);
+//            timestampBuffer.flip();
+//            val e2eTimeMillis = System.currentTimeMillis() - timestampBuffer.getLong();
+//            val msgId = evtOp.item().name();
+//            val msgSize = evtOp.item().size();
+//            if(e2eTimeMillis > 0) {
+//                Loggers.OP_TRACES.info(new EndToEndLogMessage(msgId, msgSize, e2eTimeMillis));
+//            } else {
+//                Loggers.ERR.warn("{}: publish time is in the future for the message \"{}\"", stepId, msgId);
+//            }
+//        }
+//
+//        if (null == evtData) {
+//            val streamPos = evtRead.getPosition();
+//            if (((PositionImpl)streamPos).getOwnedSegments().isEmpty()) {
+//                // means that reader doesn't own any segments, so it can't read anything
+//                Loggers.MSG.debug("{}: empty reader. No EventSegmentReader assigned", stepId);
+//            }
+//            // received an empty answer, so don't count the operation anywhere and just do the recycling
+//            completeOperation(evtOp, PENDING);
+//        } else {
+//            val bytesDone = evtData.remaining();
+//            val evtItem = evtOp.item();
+//            evtItem.size(bytesDone);
+//            evtOp.countBytesDone(evtItem.size());
+//            completeOperation(evtOp, SUCC);
+//        }
+    }
+
     @Override
     protected void doClose()
             throws IOException {
@@ -262,6 +326,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             }
         }
     }
+
 
     @Override
     public String toString() {
