@@ -78,6 +78,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     protected final int nodePort;
     protected final int maxConnectionsPerSegmentstore;
     protected final long controlApiTimeoutMillis;
+    protected final int partitionCount;
     private final RoutingKeyFunction<I> routingKeyFunc;
     private final boolean controlScopeFlag;
     private final AtomicInteger rrc = new AtomicInteger(0);
@@ -130,8 +131,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         this.endpointAddrs = endpointAddrList.toArray(new String[endpointAddrList.size()]);
         this.requestAuthTokenFunc = null; // do not use
         this.requestNewPathFunc = null; // do not use
-        val connConfig = nodeConfig.configVal("conn");
-
+        val scalingConfig = storageConfig.configVal("scaling");
+        this.partitionCount = scalingConfig.intVal("partitions");
     }
 
 
@@ -257,9 +258,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         ClientConfig clientConfig = createClientConfig(endpointUri);
         KeyValueTableManagerImpl kvtManager = new KeyValueTableManagerImpl(clientConfig);
         KeyValueTableConfiguration kvtConfig = KeyValueTableConfiguration.builder()
-                .partitionCount(1) //TODO: partition count
+                .partitionCount(partitionCount)
                 .build();
-        kvtManager.createKeyValueTable(scopeName, kvtName, kvtConfig);
+        //kvtManager.createKeyValueTable(scopeName, kvtName, kvtConfig);
         val factory = KeyValueTableFactory.withScope(scopeName, clientConfig);
         KeyValueTable<String, String> kvt = factory.forKeyValueTable(kvtName, new UTF8StringSerializer(), new UTF8StringSerializer(),
                 KeyValueTableClientConfiguration.builder().build());

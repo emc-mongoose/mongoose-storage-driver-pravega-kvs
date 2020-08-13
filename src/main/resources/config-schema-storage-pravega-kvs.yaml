@@ -8,6 +8,8 @@ storage:
       key:
         enabled: boolean
         count: long
+    scaling:
+      segments: int
   namespace: string
   net:
     bindBacklogSize: int
