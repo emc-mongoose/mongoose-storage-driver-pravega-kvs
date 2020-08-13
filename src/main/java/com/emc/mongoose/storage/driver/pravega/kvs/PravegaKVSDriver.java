@@ -131,7 +131,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         this.endpointAddrs = endpointAddrList.toArray(new String[endpointAddrList.size()]);
         this.requestAuthTokenFunc = null; // do not use
         this.requestNewPathFunc = null; // do not use
-        val scalingConfig = storageConfig.configVal("scaling");
+        val scalingConfig = driverConfig.configVal("scaling");
         this.partitionCount = scalingConfig.intVal("partitions");
     }
 
@@ -189,9 +189,23 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             final I lastPrevItem,
             final int count)
             throws EOFException {
-        return null;
+        final List<I> items;
+        items = makeEventItems(itemFactory, path, prefix, lastPrevItem, count);
+        // as we don't know how many items in the kvt, we allocate memory for 1 batch of ops
+        return items;
     }
 
+    List<I> makeEventItems(
+            final ItemFactory<I> itemFactory, final String path, final String prefix, final I lastPrevItem, final int count) throws EOFException {
+        if (null != lastPrevItem) {
+            throw new EOFException();
+        }
+        val items = new ArrayList<I>();
+        for (var i = 0; i < count; i++) {
+            items.add(itemFactory.getItem(path + SLASH + (prefix == null ? i : prefix + i), 0, 0));
+        }
+        return items;
+    }
 
     @Override
     protected boolean prepare(final O operation) {
@@ -278,7 +292,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                     val kvtPutFuture = kvt.put(null, "a", "b"); // first parameter is key family
                     try {
                         op.finishRequest();
-                    } catch(final IllegalStateException ignored) {
+                    } catch (final IllegalStateException ignored) {
                     }
                     kvtPutFuture.handle((version, thrown) -> handlePutFuture(op, thrown, kvpValueSize));
                 }
