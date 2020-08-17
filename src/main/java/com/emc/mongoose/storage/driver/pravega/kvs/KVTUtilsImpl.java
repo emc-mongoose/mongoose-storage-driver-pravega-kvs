@@ -14,27 +14,28 @@ import java.net.URI;
 public class KVTUtilsImpl implements KVTUtils {
 
     @NonNull
-    private final String controllerUri;
+    private final URI controllerUri;
     @NonNull
-    private final String scopeName;
+    private final KeyValueTableFactory factory;
+    @NonNull
+    private final KeyValueTable table;
 
-    public KVTUtilsImpl(final String controllerUri, final String scopeName) {
+    public KVTUtilsImpl(final URI controllerUri, final String scopeName, final String tableName) {
         this.controllerUri = controllerUri;
-        this.scopeName = scopeName;
+        this.factory = KeyValueTableFactory
+            .withScope(scopeName, ClientConfig.builder().controllerURI(controllerUri).build());
+        this.table = factory.forKeyValueTable(tableName, new UTF8StringSerializer(), new UTF8StringSerializer(),
+            KeyValueTableClientConfiguration.builder().build());
     }
 
+    @Override
     public KeyValueTableManager createManager() {
-        return KeyValueTableManager.create(URI.create(controllerUri));
+        return KeyValueTableManager.create(controllerUri);
     }
 
-    public KeyValueTableFactory createKVTFactory() {
-        return KeyValueTableFactory
-                .withScope(scopeName, ClientConfig.builder().controllerURI(URI.create(controllerUri)).build());
-    }
-
-    public KeyValueTable<String, String> createKVT(final KeyValueTableFactory factory) {
-        return factory.forKeyValueTable(scopeName, new UTF8StringSerializer(), new UTF8StringSerializer(),
-                KeyValueTableClientConfiguration.builder().build());
+    @Override
+    public KeyValueTable<String, String> KVT() {
+        return table;
     }
 
 }

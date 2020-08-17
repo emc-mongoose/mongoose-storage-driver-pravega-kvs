@@ -1,2 +1,0 @@
-- name: Mirror to GitLab and run GitLab CI
-  uses: SvanBoxel/gitlab-mirror-and-ci-action@0.2
