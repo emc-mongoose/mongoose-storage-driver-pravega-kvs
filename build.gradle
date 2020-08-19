@@ -106,11 +106,11 @@ task clonePravegaRepo {
 		}
 	}
 }
-task pravegaClientJars(type: Exec, dependsOn: clonePravegaRepo) {
-	workingDir pravegaSrcDir
-	commandLine "./gradlew", "-PpravegaVersion=${pravegaVersion}", ":client:jar"
-}
-compileJava.dependsOn += pravegaClientJars
+//task pravegaClientJars(type: Exec, dependsOn: clonePravegaRepo) {
+//	workingDir pravegaSrcDir
+//	commandLine "./gradlew", "-PpravegaVersion=${pravegaVersion}", ":client:jar"
+//}
+//compileJava.dependsOn += pravegaClientJars
 task pravegaDistInstall(type: Exec, dependsOn: clonePravegaRepo) {
 	workingDir pravegaSrcDir
 	commandLine "./gradlew", "-PpravegaVersion=${pravegaVersion}", "distribution", "install"

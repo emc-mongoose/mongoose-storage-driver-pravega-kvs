@@ -24,6 +24,7 @@ import java.net.URISyntaxException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -206,11 +207,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                 LogUtil.exception(
                     Level.DEBUG, cause, "Failed open the file: {}"
                 );
-            } else if (cause != null) {
-                LogUtil.exception(Level.DEBUG, cause, "Unexpected failure");
-            } else {
-                LogUtil.exception(Level.DEBUG, e, "Unexpected failure");
-            }
+            } else LogUtil.exception(Level.DEBUG, Objects.requireNonNullElse(cause, e), "Unexpected failure");
         }
         return false;
     }
@@ -247,19 +244,15 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                 } catch (final IllegalStateException ignored) {
                 }
                 val bytesDone = new UTF8StringSerializer().serialize(kvp.getValue()).remaining();
-                tableEntryFuture.handle((version, thrown) -> handleGetFuture(kvpOp, thrown, bytesDone));
+                tableEntryFuture.handle((tableEntry, thrown) -> handleGetFuture(kvpOp, thrown, bytesDone));
             }
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        } catch (ExecutionException e) {
-            e.printStackTrace();
-        } catch (TimeoutException e) {
+        } catch (final InterruptedException | ExecutionException | TimeoutException e) {
             e.printStackTrace();
         }
         return true;
     }
 
-    protected Object handleGetFuture(final O op, final Throwable thrown, final long transferSize) {
+    private Object handleGetFuture(final O op, final Throwable thrown, final long transferSize) {
         try {
             if (null == thrown) {
                 op.startResponse();
@@ -275,7 +268,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         return null;
     }
 
-    protected final void completeOperation(final O op, final Operation.Status status) {
+    private void completeOperation(final O op, final Operation.Status status) {
         op.status(status);
         handleCompleted(op);
     }
