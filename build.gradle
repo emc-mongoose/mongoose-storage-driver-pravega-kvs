@@ -79,7 +79,7 @@ ext {
 	pravegaSharedProtocolJarDir = "${pravegaSrcDir}${File.separator}shared${File.separator}protocol${File.separator}${buildLibsPath}"
 }
 wrapper {
-	gradleVersion = "4.10.3" //TODO: update
+	gradleVersion = "5.5.1" //TODO: update
 }
 import org.ajoberstar.grgit.Grgit
 task clonePravegaRepo {
