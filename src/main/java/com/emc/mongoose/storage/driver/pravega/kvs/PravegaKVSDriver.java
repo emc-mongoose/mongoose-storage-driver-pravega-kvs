@@ -312,19 +312,14 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         try {
             switch (opType) {
                 case NOOP:
-
-                    break;
+                    return submitNoop(op);
                 case CREATE:
                     return submitCreate(op);
                 case READ:
                     submitRead(op);
                     break;
                 case UPDATE:
-
-                    break;
                 case DELETE:
-
-                    break;
                 case LIST:
                 default:
                     throw new AssertionError("\"" + opType + "\" operation isn't implemented");
@@ -341,7 +336,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         return false;
     }
 
-    private boolean noop(final O op) {
+    private boolean submitNoop(final O op) {
         op.startRequest();
         op.finishRequest();
         op.startResponse();
@@ -361,7 +356,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val opType = anyOp.type();
         switch (opType) {
             case NOOP:
-                for (var i = from; i < to && noop(ops.get(i)); i++) ;
+                for (var i = from; i < to && submitNoop(ops.get(i)); i++) ;
                 return to - from;
             case CREATE:
                 for (var i = from; i < to && submitCreate(ops.get(i)); i++) ;
@@ -460,14 +455,18 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             val kvtUtils = new KVTUtilsImpl(endpointUri, this.scopeName, kvtName);
             val kvTable = kvtUtils.KVT();
 
-            // read by key
-            val tableEntryFuture = kvTable.get("", "");
-            val kvp = tableEntryFuture.get(controlApiTimeoutMillis, MILLISECONDS);
+            // isn't used currently
+            val key = kvpOp.item().name();
+            val family = extractKVFName(key);
 
-            if (kvp == null) { // can kvp be null ???
-                //completeOperation(kvpOp, ...);
-            } else if (concurrencyThrottle.tryAcquire()) {
+            if (concurrencyThrottle.tryAcquire()) {
                 kvpOp.startRequest();
+                // read by key
+                val tableEntryFuture = kvTable.get(/*family*/"", /*key*/ "a");
+                val kvp = tableEntryFuture.get(controlApiTimeoutMillis, MILLISECONDS);
+                if (kvp == null) { // can kvp be null ???
+                    //completeOperation(kvpOp, ...);
+                }
                 try {
                     kvpOp.finishRequest();
                 } catch (final IllegalStateException ignored) {
@@ -477,7 +476,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             }
         } catch (final InterruptedException | ExecutionException | TimeoutException e) {
             e.printStackTrace();
+            throw new AssertionError();
         }
+
         return true;
     }
 
@@ -558,5 +559,10 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             kvtName = kvtName.substring(0, kvtName.length() - 1);
         }
         return kvtName;
+    }
+
+    private static String extractKVFName(final String itemName) {
+        // TODO
+        return "";
     }
 }
