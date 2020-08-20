@@ -3,11 +3,14 @@ storage:
   driver:
     control:
       scope: true
+      kvt: true
       timeoutMillis: 2000
     hashing:
       key:
         enabled: false
         count: 0
+    scaling:
+      partitions: 1
   namespace: goose
   net:
     bindBacklogSize: 0
@@ -27,5 +30,3 @@ storage:
       addrs:
         - 127.0.0.1
       port: 9090
-      conn:
-        attemptsLimit: 0

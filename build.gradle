@@ -54,7 +54,7 @@ ext {
 		confuseIoYaml            : "1.0.0",
 		disruptor                : "3.4.2",
 		dockerJava               : "3.0.14",
-		grpc                     : "1.17.1",
+		grpc                     : "1.30.0",
 		guava                    : "28.1-jre",
 		log4j                    : "2.8.2",
 		mongooseBase             : "4.2.19",
