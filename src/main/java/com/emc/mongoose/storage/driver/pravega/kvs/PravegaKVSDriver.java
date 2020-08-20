@@ -380,14 +380,14 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
         val kvtName = extractKVTName(op.dstPath());
         val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
+
         val controller = controllerCache.computeIfAbsent(clientConfig, this::createController);
         val scopeCreateFunc = scopeCreateFuncCache.computeIfAbsent(controller, ScopeCreateFunctionImpl::new);
         // create the scope if necessary
 
         val kvtCreateFunc = kvtCreateFuncCache.computeIfAbsent(scopeName, scopeCreateFunc);
-        scopeKVTsCache
-            .computeIfAbsent(scopeName, this::createInstanceCache)
-            .computeIfAbsent(kvtName, kvtCreateFunc);
+        scopeKVTsCache.computeIfAbsent(scopeName, this::createInstanceCache).computeIfAbsent(kvtName, kvtCreateFunc);
+
         // create the kvt factory create function if necessary
         val kvtFactoryCreateFunc = kvtFactoryCreateFuncCache.computeIfAbsent(
             clientConfig,
@@ -450,10 +450,19 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         try {
             val nodeAddr = kvpOp.nodeAddr();
             val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
+            val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
             val kvtName = extractKVTName(kvpOp.srcPath());
+            // create the kvt factory create function if necessary
+            val kvtFactoryCreateFunc = kvtFactoryCreateFuncCache.computeIfAbsent(
+                clientConfig,
+                KVTFactoryCreateFunctionImpl::new);
+            // create the kvt factory if necessary
+            val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
 
-            val kvtUtils = new KVTUtilsImpl(endpointUri, this.scopeName, kvtName);
-            val kvTable = kvtUtils.KVT();
+            val kvTable = kvtFactory.forKeyValueTable(kvtName,
+                new UTF8StringSerializer(),
+                new UTF8StringSerializer(),
+                KeyValueTableClientConfiguration.builder().build());
 
             // isn't used currently
             val key = kvpOp.item().name();
