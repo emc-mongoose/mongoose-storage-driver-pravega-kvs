@@ -1,6 +1,5 @@
 package com.emc.mongoose.storage.driver.pravega.kvs.cache;
 
-import io.pravega.client.EventStreamClientFactory;
 import io.pravega.client.KeyValueTableFactory;
 
 import java.util.function.Function;

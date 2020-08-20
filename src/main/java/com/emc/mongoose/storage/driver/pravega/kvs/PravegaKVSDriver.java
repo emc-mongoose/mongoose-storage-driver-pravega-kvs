@@ -29,6 +29,7 @@ import com.emc.mongoose.base.storage.Credential;
 import com.emc.mongoose.storage.driver.coop.CoopStorageDriverBase;
 import com.emc.mongoose.base.item.op.Operation.Status;
 
+import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTClientCreateFunction;
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTCreateFunction;
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTFactoryCreateFunction;
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.ScopeCreateFunction;
@@ -96,19 +97,17 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     private final AtomicInteger rrc = new AtomicInteger(0);
 
     // caches allowing the lazy creation of the necessary things:
-    // * endpoints
-    private final Map<String, URI> endpointCache = new ConcurrentHashMap<>();
-    private final Map<URI, ClientConfig> clientConfigCache = new ConcurrentHashMap<>();
-    // * controllers
-    private final Map<ClientConfig, Controller> controllerCache = new ConcurrentHashMap<>();
-    // * scopes
     private final Map<Controller, ScopeCreateFunction> scopeCreateFuncCache = new ConcurrentHashMap<>();
     private final Map<String, KVTCreateFunction> kvtCreateFuncCache = new ConcurrentHashMap<>();
-    // * streams
-    private final Map<String, Map<String, KeyValueTableConfiguration>> scopeKVTsCache = new ConcurrentHashMap<>();
-    // * kvt factories
     private final Map<ClientConfig, KVTFactoryCreateFunction> kvtFactoryCreateFuncCache = new ConcurrentHashMap<>();
+    private final Map<KeyValueTableFactory, KVTClientCreateFunction> kvtClientCreateFuncCache = new ConcurrentHashMap<>();
+    //TODO: describe why we introduce create functions not don't simple use a method (2 parameters)
+    private final Map<String, URI> endpointCache = new ConcurrentHashMap<>();
+    private final Map<URI, ClientConfig> clientConfigCache = new ConcurrentHashMap<>();
+    private final Map<ClientConfig, Controller> controllerCache = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, KeyValueTableConfiguration>> scopeKVTsCache = new ConcurrentHashMap<>();
     private final Map<String, KeyValueTableFactory> kvtFactoryCache = new ConcurrentHashMap<>();
+    private final Map<String, KeyValueTable> kvtCache = new ConcurrentHashMap<>();
 
     ClientConfig createClientConfig(final URI endpointUri) {
         val clientConfigBuilder = ClientConfig
@@ -199,6 +198,20 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         }
     }
 
+    @Value
+    final class KVTClientCreateFunctionImpl
+            implements KVTClientCreateFunction {
+
+        KeyValueTableFactory kvtFactory;
+
+        @Override
+        public final KeyValueTable apply(final String kvtName) {
+            val kvtConfig = KeyValueTableClientConfiguration.builder()
+                    .build();
+            return kvtFactory.forKeyValueTable(kvtName, new UTF8StringSerializer(),
+                    new UTF8StringSerializer(), kvtConfig);
+        }
+    }
 
     Controller createController(final ClientConfig clientConfig) {
         val controllerConfig = ControllerImplConfig
@@ -447,9 +460,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         //kvtManager.createKeyValueTable(scopeName, kvtName, kvtConfig);
         //controller.createKeyValueTable(scopeName, keyValueTableName, config)
         //val factory = KeyValueTableFactory.withScope(scopeName, clientConfig);
-        KeyValueTable<String, String> kvt = kvtFactory.forKeyValueTable(kvtName, new UTF8StringSerializer(), new UTF8StringSerializer(),
-                KeyValueTableClientConfiguration.builder().build());
-
+        val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientCreateFunctionImpl::new);
+        KeyValueTable<String, String> kvt = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
         //KeyValueTableInfo kvtInfo = new KeyValueTableInfo(scopeName, kvtName);
         try {
             val kvpValueSize = op.item().size();
