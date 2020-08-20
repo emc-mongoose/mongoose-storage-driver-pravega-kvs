@@ -22,12 +22,16 @@ import com.emc.mongoose.base.item.DataItem;
 import com.emc.mongoose.base.item.ItemFactory;
 import com.emc.mongoose.base.item.op.OpType;
 import com.emc.mongoose.base.item.op.data.DataOperation;
+import com.emc.mongoose.base.logging.LogContextThreadFactory;
 import com.emc.mongoose.base.logging.LogUtil;
 import com.emc.mongoose.base.logging.Loggers;
 import com.emc.mongoose.base.storage.Credential;
 import com.emc.mongoose.storage.driver.coop.CoopStorageDriverBase;
 import com.emc.mongoose.base.item.op.Operation.Status;
 
+import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTCreateFunction;
+import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTFactoryCreateFunction;
+import com.emc.mongoose.storage.driver.pravega.kvs.cache.ScopeCreateFunction;
 import com.github.akurilov.commons.system.DirectMemUtil;
 import com.github.akurilov.confuse.Config;
 
@@ -58,9 +62,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 
 import io.pravega.client.ClientConfig;
+import io.pravega.client.EventStreamClientFactory;
 import io.pravega.client.KeyValueTableFactory;
 import io.pravega.client.admin.KeyValueTableManager;
+import io.pravega.client.admin.StreamManager;
 import io.pravega.client.admin.impl.KeyValueTableManagerImpl;
+import io.pravega.client.control.impl.Controller;
+import io.pravega.client.control.impl.ControllerImpl;
+import io.pravega.client.control.impl.ControllerImplConfig;
+import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.impl.UTF8StringSerializer;
 import io.pravega.client.tables.KeyValueTable;
 import io.pravega.client.tables.KeyValueTableClientConfiguration;
@@ -77,15 +87,28 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     protected final String[] endpointAddrs;
     protected final int nodePort;
     protected final int maxConnectionsPerSegmentstore;
-    protected final long controlApiTimeoutMillis;
     protected final int partitionCount;
-    private final RoutingKeyFunction<I> routingKeyFunc;
+    protected final long controlApiTimeoutMillis;
     private final boolean controlScopeFlag;
+    private final boolean controlKVTFlag;
+    private final RoutingKeyFunction<I> routingKeyFunc;
+    private final ScheduledExecutorService bgExecutor;
     private final AtomicInteger rrc = new AtomicInteger(0);
 
     // caches allowing the lazy creation of the necessary things:
     // * endpoints
     private final Map<String, URI> endpointCache = new ConcurrentHashMap<>();
+    private final Map<URI, ClientConfig> clientConfigCache = new ConcurrentHashMap<>();
+    // * controllers
+    private final Map<ClientConfig, Controller> controllerCache = new ConcurrentHashMap<>();
+    // * scopes
+    private final Map<Controller, ScopeCreateFunction> scopeCreateFuncCache = new ConcurrentHashMap<>();
+    private final Map<String, KVTCreateFunction> kvtCreateFuncCache = new ConcurrentHashMap<>();
+    // * streams
+    private final Map<String, Map<String, KeyValueTableConfiguration>> scopeKVTsCache = new ConcurrentHashMap<>();
+    // * kvt factories
+    private final Map<ClientConfig, KVTFactoryCreateFunction> kvtFactoryCreateFuncCache = new ConcurrentHashMap<>();
+    private final Map<String, KeyValueTableFactory> kvtFactoryCache = new ConcurrentHashMap<>();
 
     ClientConfig createClientConfig(final URI endpointUri) {
         val clientConfigBuilder = ClientConfig
@@ -96,6 +119,94 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             clientConfigBuilder.credentials(cred);
         }*/
         return clientConfigBuilder.build();
+    }
+
+
+    @Value
+    final class ScopeCreateFunctionImpl
+            implements ScopeCreateFunction {
+
+        Controller controller;
+
+        @Override
+        public final KVTCreateFunction apply(final String scopeName) {
+            if(controlScopeFlag) {
+                try {
+                    if (controller.createScope(scopeName).get(controlApiTimeoutMillis, MILLISECONDS)) {
+                        Loggers.MSG.trace("Scope \"{}\" was created", scopeName);
+                    } else {
+                        Loggers.MSG.info(
+                                "Scope \"{}\" was not created, may be already existing before", scopeName);
+                    }
+                } catch (final InterruptedException e) {
+                    throwUnchecked(e);
+                } catch (final Throwable cause) {
+                    LogUtil.exception(
+                            Level.WARN, cause, "{}: failed to create the scope \"{}\"", stepId, scopeName
+                    );
+                }
+            }
+            return new KVTCreateFunctionImpl(controller, scopeName);
+        }
+    }
+
+    @Value
+    final class KVTCreateFunctionImpl
+            implements KVTCreateFunction {
+
+        Controller controller;
+        String scopeName;
+
+        @Override
+        public final KeyValueTableConfiguration apply(final String kvtName) {
+            KeyValueTableConfiguration kvtConfig = KeyValueTableConfiguration.builder()
+                    .partitionCount(partitionCount)
+                    .build();
+            if(controlKVTFlag) {
+                try {
+                    val createKVTFuture = controller.createKeyValueTable(scopeName, kvtName, kvtConfig);
+                    if (createKVTFuture.get(controlApiTimeoutMillis, MILLISECONDS)) {
+                        Loggers.MSG.trace(
+                                "KVT \"{}/{}\" was created using the config: {}",
+                                scopeName,
+                                kvtName,
+                                kvtConfig);
+                    } else {
+                        //TODO: once it is supported
+                        //scaleToPartitionCount(
+                        //        controller, controlApiTimeoutMillis, scopeName, kvtName, scalingPolicy);
+                    }
+                } catch (final InterruptedException e) {
+                    throwUnchecked(e);
+                } catch (final Throwable cause) {
+                    LogUtil.exception(
+                            Level.WARN, cause, "{}: failed to create the KVT \"{}\"", stepId, kvtName);
+                }
+            }
+            return kvtConfig;
+        }
+    }
+
+    @Value
+    final class KVTFactoryCreateFunctionImpl
+            implements KVTFactoryCreateFunction {
+
+        ClientConfig clientConfig;
+
+        @Override
+        public final KeyValueTableFactory apply(final String scopeName) {
+            return KeyValueTableFactory.withScope(scopeName, clientConfig);
+        }
+    }
+
+
+    Controller createController(final ClientConfig clientConfig) {
+        val controllerConfig = ControllerImplConfig
+                .builder()
+                .clientConfig(clientConfig)
+                .maxBackoffMillis(MAX_BACKOFF_MILLIS)
+                .build();
+        return new ControllerImpl(controllerConfig, bgExecutor);
     }
 
     PravegaKVSDriver(
@@ -112,7 +223,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val controlConfig = driverConfig.configVal("control");
         this.controlApiTimeoutMillis = controlConfig.longVal("timeoutMillis");
         this.controlScopeFlag = controlConfig.boolVal("scope");
-
+        this.controlKVTFlag = controlConfig.boolVal("kvt");
         val netConfig = storageConfig.configVal("net");
         this.uriSchema = netConfig.stringVal("uri-schema");
         this.scopeName = storageConfig.stringVal("namespace");
@@ -133,6 +244,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         this.requestNewPathFunc = null; // do not use
         val scalingConfig = driverConfig.configVal("scaling");
         this.partitionCount = scalingConfig.intVal("partitions");
+        this.bgExecutor = Executors.newScheduledThreadPool(
+                Runtime.getRuntime().availableProcessors(),
+                new LogContextThreadFactory(toString(), true));
     }
 
 
@@ -189,17 +303,16 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             final I lastPrevItem,
             final int count)
             throws EOFException {
-        final List<I> items;
-        items = makeEventItems(itemFactory, path, prefix, lastPrevItem, count);
-        // as we don't know how many items in the kvt, we allocate memory for 1 batch of ops
-        return items;
-    }
-
-    List<I> makeEventItems(
-            final ItemFactory<I> itemFactory, final String path, final String prefix, final I lastPrevItem, final int count) throws EOFException {
         if (null != lastPrevItem) {
             throw new EOFException();
         }
+        // as we don't know how many items in the kvt, we allocate memory for 1 batch of ops
+        return makeItems(itemFactory, path, prefix, count);
+    }
+
+    List<I> makeItems(
+            final ItemFactory<I> itemFactory, final String path, final String prefix, final int count) throws EOFException {
+
         val items = new ArrayList<I>();
         for (var i = 0; i < count; i++) {
             items.add(itemFactory.getItem(path + SLASH + (prefix == null ? i : prefix + i), 0, 0));
@@ -209,13 +322,15 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
     @Override
     protected boolean prepare(final O operation) {
-        super.prepare(operation);
-        var endpointAddr = operation.nodeAddr();
-        if (endpointAddr == null) {
-            endpointAddr = nextEndpointAddr();
-            operation.nodeAddr(endpointAddr);
+        if (super.prepare(operation)) {
+            var endpointAddr = operation.nodeAddr();
+            if (endpointAddr == null) {
+                endpointAddr = nextEndpointAddr();
+                operation.nodeAddr(endpointAddr);
+            }
+            return true;
         }
-        return true;
+        return false;
     }
 
     /**
@@ -265,18 +380,74 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         return false;
     }
 
+    final boolean noop(final O op) {
+        op.startRequest();
+        op.finishRequest();
+        op.startResponse();
+        try {
+            op.countBytesDone(op.item().size());
+        } catch (final IOException ignored) {
+        }
+        op.finishResponse();
+        op.status(SUCC);
+        handleCompleted(op);
+        return true;
+    }
+
+    @Override
+    protected final int submit(final List<O> ops, final int from, final int to)
+            throws IllegalStateException {
+        val anyOp = ops.get(from);
+        val opType = anyOp.type();
+        switch (opType) {
+            case NOOP:
+                for (var i = from; i < to && noop(ops.get(i)); i++) ;
+                return to - from;
+            case CREATE:
+                for (var i = from; i < to && submitCreate(ops.get(i)); i++) ;
+                return to - from;
+            case READ:
+                //for (var i = from; i < to && submitRead(ops.get(i)); i++) ;
+                return to - from;
+            default:
+                throw new AssertionError("Unexpected operation type: " + opType);
+        }
+    }
+
+    @Override
+    protected final int submit(final List<O> ops)
+            throws IllegalStateException {
+        return submit(ops, 0, ops.size());
+    }
+
     private boolean submitCreate(O op) {
         val nodeAddr = op.nodeAddr();
         val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
         val kvtName = extractKVTName(op.dstPath());
-        ClientConfig clientConfig = createClientConfig(endpointUri);
-        KeyValueTableManagerImpl kvtManager = new KeyValueTableManagerImpl(clientConfig);
-        KeyValueTableConfiguration kvtConfig = KeyValueTableConfiguration.builder()
-                .partitionCount(partitionCount)
-                .build();
+        val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
+        val controller = controllerCache.computeIfAbsent(clientConfig, this::createController);
+        val scopeCreateFunc = scopeCreateFuncCache.computeIfAbsent(controller, ScopeCreateFunctionImpl::new);
+        // create the scope if necessary
+
+        val kvtCreateFunc = kvtCreateFuncCache.computeIfAbsent(scopeName, scopeCreateFunc);
+        scopeKVTsCache
+                .computeIfAbsent(scopeName, this::createInstanceCache)
+                .computeIfAbsent(kvtName, kvtCreateFunc);
+        // create the kvt factory create function if necessary
+        val kvtFactoryCreateFunc = kvtFactoryCreateFuncCache.computeIfAbsent(
+                clientConfig,
+                KVTFactoryCreateFunctionImpl::new);
+        // create the kvt factory if necessary
+        val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
+
+        //KeyValueTableManagerImpl kvtManager = new KeyValueTableManagerImpl(clientConfig);
+//        KeyValueTableConfiguration kvtConfig = KeyValueTableConfiguration.builder()
+//                .partitionCount(partitionCount)
+//                .build();
         //kvtManager.createKeyValueTable(scopeName, kvtName, kvtConfig);
-        val factory = KeyValueTableFactory.withScope(scopeName, clientConfig);
-        KeyValueTable<String, String> kvt = factory.forKeyValueTable(kvtName, new UTF8StringSerializer(), new UTF8StringSerializer(),
+        //controller.createKeyValueTable(scopeName, keyValueTableName, config)
+        //val factory = KeyValueTableFactory.withScope(scopeName, clientConfig);
+        KeyValueTable<String, String> kvt = kvtFactory.forKeyValueTable(kvtName, new UTF8StringSerializer(), new UTF8StringSerializer(),
                 KeyValueTableClientConfiguration.builder().build());
 
         //KeyValueTableInfo kvtInfo = new KeyValueTableInfo(scopeName, kvtName);
@@ -325,15 +496,6 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         handleCompleted(op);
     }
 
-    @Override
-    protected int submit(List<O> ops, int from, int to) throws IllegalStateException {
-        return 0;
-    }
-
-    @Override
-    protected int submit(List<O> ops) throws IllegalStateException {
-        return 0;
-    }
 
     static String extractKVTName(final String itemPath) {
         String kvtName = itemPath;

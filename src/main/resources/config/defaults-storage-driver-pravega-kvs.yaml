@@ -3,6 +3,7 @@ storage:
   driver:
     control:
       scope: true
+      kvt: true
       timeoutMillis: 2000
     hashing:
       key:
