@@ -423,7 +423,6 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val controller = controllerCache.computeIfAbsent(clientConfig, this::createController);
         val scopeCreateFunc = scopeCreateFuncCache.computeIfAbsent(controller, ScopeCreateFunctionImpl::new);
         // create the scope if necessary
-
         val kvtCreateFunc = kvtCreateFuncCache.computeIfAbsent(scopeName, scopeCreateFunc);
         scopeKVTsCache
                 .computeIfAbsent(scopeName, this::createInstanceCache)
@@ -434,18 +433,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                 KVTFactoryCreateFunctionImpl::new);
         // create the kvt factory if necessary
         val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
-
-        //KeyValueTableManagerImpl kvtManager = new KeyValueTableManagerImpl(clientConfig);
-//        KeyValueTableConfiguration kvtConfig = KeyValueTableConfiguration.builder()
-//                .partitionCount(partitionCount)
-//                .build();
-        //kvtManager.createKeyValueTable(scopeName, kvtName, kvtConfig);
-        //controller.createKeyValueTable(scopeName, keyValueTableName, config)
-        //val factory = KeyValueTableFactory.withScope(scopeName, clientConfig);
         val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientCreateFunctionImpl::new);
         //TODO: probably should be thread local
         KeyValueTable<String, I> kvt = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
-        //KeyValueTableInfo kvtInfo = new KeyValueTableInfo(scopeName, kvtName);
         try {
             val kvpValueSize = op.item().size();
             if (kvpValueSize > MAX_KVP_VALUE) {
@@ -474,15 +464,14 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
     protected Object handlePutFuture(final O op, final Throwable thrown, final long transferSize) {
         try {
-            if (null == thrown) {
+            if (null != thrown) {
+                failOperation(op, FAIL_UNKNOWN);
+            }
                 op.startResponse();
                 op.finishResponse();
                 op.countBytesDone(transferSize);
                 op.status(SUCC);
                 handleCompleted(op);
-            } else {
-                failOperation(op, FAIL_UNKNOWN);
-            }
         } finally {
             concurrencyThrottle.release();
         }

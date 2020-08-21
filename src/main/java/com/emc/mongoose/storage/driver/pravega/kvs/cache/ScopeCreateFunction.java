@@ -3,15 +3,15 @@ package com.emc.mongoose.storage.driver.pravega.kvs.cache;
 import java.util.function.Function;
 
 /**
- A function to create the scope using the scope name as a function argument
+ A function to create the kvt using the scope name as a function argument
  */
 public interface ScopeCreateFunction
-				extends Function<String, com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTCreateFunction> {
+				extends Function<String, KVTCreateFunction> {
 
 	/**
-	 @param scopeName the name of the scope to create
-	 @return the function to create a stream in the given scope
+	 @param scopeName the name of the scope where to create kvt
+	 @return the function to create a kvt in the given scope
 	 */
 	@Override
-    com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTCreateFunction apply(final String scopeName);
+    KVTCreateFunction apply(final String scopeName);
 }
