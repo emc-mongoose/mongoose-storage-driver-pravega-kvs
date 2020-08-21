@@ -1,16 +1,10 @@
 package com.emc.mongoose.storage.driver.pravega.kvs;
 
 import static com.emc.mongoose.base.Exceptions.throwUncheckedIfInterrupted;
-import static com.emc.mongoose.base.item.op.OpType.NOOP;
 import static com.emc.mongoose.base.item.op.Operation.SLASH;
 import static com.emc.mongoose.base.item.op.Operation.Status.FAIL_IO;
-import static com.emc.mongoose.base.item.op.Operation.Status.FAIL_TIMEOUT;
 import static com.emc.mongoose.base.item.op.Operation.Status.FAIL_UNKNOWN;
-import static com.emc.mongoose.base.item.op.Operation.Status.INTERRUPTED;
-import static com.emc.mongoose.base.item.op.Operation.Status.PENDING;
-import static com.emc.mongoose.base.item.op.Operation.Status.RESP_FAIL_UNKNOWN;
 import static com.emc.mongoose.base.item.op.Operation.Status.SUCC;
-import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.DRIVER_NAME;
 import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.MAX_BACKOFF_MILLIS;
 
 import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.MAX_KVP_VALUE;
@@ -33,14 +27,13 @@ import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTClientCreateFunction
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTCreateFunction;
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTFactoryCreateFunction;
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.ScopeCreateFunction;
-import com.github.akurilov.commons.system.DirectMemUtil;
+import com.emc.mongoose.storage.driver.pravega.kvs.io.DataItemSerializer;
 import com.github.akurilov.confuse.Config;
 
 import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -48,30 +41,18 @@ import java.util.Map;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
-import java.util.ServiceLoader;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 
 import io.pravega.client.ClientConfig;
-import io.pravega.client.EventStreamClientFactory;
 import io.pravega.client.KeyValueTableFactory;
-import io.pravega.client.admin.KeyValueTableManager;
-import io.pravega.client.admin.StreamManager;
-import io.pravega.client.admin.impl.KeyValueTableManagerImpl;
 import io.pravega.client.control.impl.Controller;
 import io.pravega.client.control.impl.ControllerImpl;
 import io.pravega.client.control.impl.ControllerImplConfig;
-import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.impl.UTF8StringSerializer;
 import io.pravega.client.tables.KeyValueTable;
 import io.pravega.client.tables.KeyValueTableClientConfiguration;
@@ -209,7 +190,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             val kvtConfig = KeyValueTableClientConfiguration.builder()
                     .build();
             return kvtFactory.forKeyValueTable(kvtName, new UTF8StringSerializer(),
-                    new UTF8StringSerializer(), kvtConfig);
+                    new DataItemSerializer(false,false), kvtConfig);
         }
     }
 
@@ -412,16 +393,17 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             throws IllegalStateException {
         val anyOp = ops.get(from);
         val opType = anyOp.type();
+        var i = from;
         switch (opType) {
             case NOOP:
-                for (var i = from; i < to && noop(ops.get(i)); i++) ;
-                return to - from;
+                for (; i < to && noop(ops.get(i)); i++) ;
+                return i - from;
             case CREATE:
-                for (var i = from; i < to && submitCreate(ops.get(i)); i++) ;
-                return to - from;
+                for (; i < to && submitCreate(ops.get(i)); i++) ;
+                return i - from;
             case READ:
                 //for (var i = from; i < to && submitRead(ops.get(i)); i++) ;
-                return to - from;
+                return i - from;
             default:
                 throw new AssertionError("Unexpected operation type: " + opType);
         }
@@ -461,23 +443,27 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         //controller.createKeyValueTable(scopeName, keyValueTableName, config)
         //val factory = KeyValueTableFactory.withScope(scopeName, clientConfig);
         val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientCreateFunctionImpl::new);
-        KeyValueTable<String, String> kvt = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
+        //TODO: probably should be thread local
+        KeyValueTable<String, I> kvt = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
         //KeyValueTableInfo kvtInfo = new KeyValueTableInfo(scopeName, kvtName);
         try {
             val kvpValueSize = op.item().size();
             if (kvpValueSize > MAX_KVP_VALUE) {
+                Loggers.ERR.warn("{}: KVP value size cannot exceed 1016KB ", stepId);
                 failOperation(op, FAIL_IO);
             } else if (kvpValueSize < 0) {
                 failOperation(op, FAIL_IO);
             } else {
                 if (concurrencyThrottle.tryAcquire()) {
                     op.startRequest();
-                    val kvtPutFuture = kvt.put(null, "a", "b"); // first parameter is key family
+                    val kvtPutFuture = kvt.put(null, op.item().name(), op.item()); // first parameter is key family
                     try {
                         op.finishRequest();
                     } catch (final IllegalStateException ignored) {
                     }
                     kvtPutFuture.handle((version, thrown) -> handlePutFuture(op, thrown, kvpValueSize));
+                } else {
+                    return false;
                 }
             }
         } catch (final IOException e) {

@@ -4,7 +4,7 @@ storage:
     control:
       scope: true
       kvt: true
-      timeoutMillis: 2000
+      timeoutMillis: 5000
     hashing:
       key:
         enabled: false
