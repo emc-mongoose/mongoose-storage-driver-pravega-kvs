@@ -152,6 +152,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                                 kvtName,
                                 kvtConfig);
                     } else {
+                        Loggers.MSG.info(
+                                "KVT \"{}\" was not created, may be already existing before", kvtName);
                         //TODO: once it is supported
                         //scaleToPartitionCount(
                         //        controller, controlApiTimeoutMillis, scopeName, kvtName, scalingPolicy);
