@@ -110,7 +110,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
         @Override
         public final KVTCreateFunction apply(final String scopeName) {
-            if(controlScopeFlag) {
+            if (controlScopeFlag) {
                 try {
                     if (controller.createScope(scopeName).get(controlApiTimeoutMillis, MILLISECONDS)) {
                         Loggers.MSG.trace("Scope \"{}\" was created", scopeName);
@@ -142,7 +142,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             KeyValueTableConfiguration kvtConfig = KeyValueTableConfiguration.builder()
                     .partitionCount(partitionCount)
                     .build();
-            if(controlKVTFlag) {
+            if (controlKVTFlag) {
                 try {
                     val createKVTFuture = controller.createKeyValueTable(scopeName, kvtName, kvtConfig);
                     if (createKVTFuture.get(controlApiTimeoutMillis, MILLISECONDS)) {
@@ -190,7 +190,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             val kvtConfig = KeyValueTableClientConfiguration.builder()
                     .build();
             return kvtFactory.forKeyValueTable(kvtName, new UTF8StringSerializer(),
-                    new DataItemSerializer(false,false), kvtConfig);
+                    new DataItemSerializer(false, false), kvtConfig);
         }
     }
 
