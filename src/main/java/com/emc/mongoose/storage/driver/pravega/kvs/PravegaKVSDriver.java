@@ -500,7 +500,23 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             throws IOException {
         super.doClose();
         // clear all caches & pools
+        kvtClientCreateFuncCache.clear();
+        scopeCreateFuncCache.clear();
+        kvtCreateFuncCache.clear();
+        kvtFactoryCreateFuncCache.clear();
+
         endpointCache.clear();
+        closeAllWithTimeout(kvtCache.values());
+        kvtCache.clear();
+        scopeKVTsCache.values().forEach(Map::clear);
+        scopeKVTsCache.clear();
+        closeAllWithTimeout(kvtFactoryCache.values());
+        kvtFactoryCache.clear();
+        clientConfigCache.clear();
+        closeAllWithTimeout(controllerCache.values());
+        controllerCache.clear();
+        endpointCache.clear();
+        bgExecutor.shutdownNow();
     }
 
     void closeAllWithTimeout(final Collection<? extends AutoCloseable> closeables) {
