@@ -63,6 +63,7 @@ ext {
 		nettyTcNative            : "2.0.25.Final",
 		protobuf                 : "3.5.1",
 		scala                    : "2.12.6",
+		lombok 					 : "1.18.8"
 	]
 	rootPkg = "com.emc.mongoose.storage.driver.pravega-kvs"
 	baseJarFileName = "mongoose"
@@ -169,7 +170,7 @@ configurations {
 configurations.all {
 	exclude module: "slf4j-log4j12"
 	resolutionStrategy {
-		force "org.projectlombok:lombok:1.18.6"
+		force "org.projectlombok:lombok:${depVersion.lombok}"
 	}
 }
 sourceSets {
@@ -178,9 +179,9 @@ sourceSets {
 	}
 }
 dependencies {
-	annotationProcessor 'org.projectlombok:lombok:1.18.8'
+	annotationProcessor "org.projectlombok:lombok:${depVersion.lombok}"
 	compileOnly(
-		"org.projectlombok:lombok:1.18.8",
+		"org.projectlombok:lombok:${depVersion.lombok}",
 		"com.github.emc-mongoose:mongoose-base:${depVersion.mongooseBase}",
 		"com.github.emc-mongoose:mongoose-storage-driver-coop:${depVersion.mongooseStorageDriverCoop}",
 		"com.github.akurilov:confuse:${depVersion.confuse}",
