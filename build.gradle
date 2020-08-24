@@ -15,11 +15,11 @@ plugins {
 	id "signing"
 	id "maven-publish"
 	id "net.ltgt.apt" version "0.21"
-	id "com.bmuschko.docker-remote-api" version "4.0.5"
+	id "com.bmuschko.docker-remote-api" version "6.6.1"
 	id "com.diffplug.gradle.spotless" version "3.18.0"
 	id "io.codearte.nexus-staging" version "0.20.0"
 	id "de.marcphilipp.nexus-publish" version "0.2.0"
-	id "org.ajoberstar.grgit" version "3.1.1"
+	id "org.ajoberstar.grgit" version "4.0.2"
 	id "com.wiredforcode.spawn" version "0.8.0"
 }
 repositories {
@@ -79,8 +79,9 @@ ext {
 	pravegaSharedProtocolJarDir = "${pravegaSrcDir}${File.separator}shared${File.separator}protocol${File.separator}${buildLibsPath}"
 }
 wrapper {
-	gradleVersion = "5.5.1" //TODO: update
+	gradleVersion = "6.4"
 }
+// Pravega tasks
 import org.ajoberstar.grgit.Grgit
 task clonePravegaRepo {
 	doLast {
@@ -106,14 +107,37 @@ task clonePravegaRepo {
 		}
 	}
 }
-//task pravegaClientJars(type: Exec, dependsOn: clonePravegaRepo) {
-//	workingDir pravegaSrcDir
-//	commandLine "./gradlew", "-PpravegaVersion=${pravegaVersion}", ":client:jar"
-//}
-//compileJava.dependsOn += pravegaClientJars
-task pravegaDistInstall(type: Exec, dependsOn: clonePravegaRepo) {
+task pravegaClientJars(type: Exec, dependsOn: clonePravegaRepo) {
 	workingDir pravegaSrcDir
-	commandLine "./gradlew", "-PpravegaVersion=${pravegaVersion}", "distribution", "install"
+	commandLine "./gradlew", "-PpravegaVersion=${pravegaVersion}", ":client:jar", "-x","javadocs"
+}
+compileJava.dependsOn += pravegaClientJars
+task pravegaDistInstall(type: Exec, dependsOn: pravegaClientJars) {
+	workingDir pravegaSrcDir
+	commandLine "./gradlew",
+			"-PpravegaVersion=${pravegaVersion}",
+			"distribution",
+			"install",
+			"-x", "javadocs",
+			"-x", ":bindings:generateJavadoc",
+			"-x", ":client:generateJavadoc",
+			"-x", ":common:generateJavadoc",
+			"-x", ":controller:generateJavadoc",
+			"-x", ":standalone:generateJavadoc",
+			"-x", ":segmentstore:contracts:generateJavadoc",
+			"-x", ":segmentstore:server:generateJavadoc",
+			"-x", ":segmentstore:storage:generateJavadoc",
+			"-x", ":shared:authplugin:generateJavadoc",
+			"-x", ":shared:cluster:generateJavadoc",
+			"-x", ":shared:controller-api:generateJavadoc",
+			"-x", ":shared:metrics:generateJavadoc",
+			"-x", ":shared:protocol:generateJavadoc",
+			"-x", ":shared:security:generateJavadoc",
+			"-x", ":test:integration:generateJavadoc",
+			"-x", ":test:system:generateJavadoc",
+			"-x", ":test:testcommon:generateJavadoc",
+			"-x", ":segmentstore:server:host:generateJavadoc",
+			"-x", ":segmentstore:storage:impl:generateJavadoc"
 }
 task pravegaExtract(dependsOn: pravegaDistInstall) {
 	doLast {
@@ -126,6 +150,7 @@ task pravegaExtract(dependsOn: pravegaDistInstall) {
 		pravegaDir.deleteDir()
 	}
 }
+// Mongoose build tasks
 configurations {
 	all {
 		resolutionStrategy {
@@ -153,8 +178,9 @@ sourceSets {
 	}
 }
 dependencies {
+	annotationProcessor 'org.projectlombok:lombok:1.18.8'
 	compileOnly(
-		"org.projectlombok:lombok:1.18.6",
+		"org.projectlombok:lombok:1.18.8",
 		"com.github.emc-mongoose:mongoose-base:${depVersion.mongooseBase}",
 		"com.github.emc-mongoose:mongoose-storage-driver-coop:${depVersion.mongooseStorageDriverCoop}",
 		"com.github.akurilov:confuse:${depVersion.confuse}",
@@ -260,11 +286,11 @@ javadoc {
 	classpath += configurations.provided
 }
 task javadocJar(type: Jar, dependsOn: javadoc) {
-	classifier = "javadoc"
+	archiveClassifier = "javadoc"
 	from javadoc.destinationDir
 }
 task sourcesJar(type: Jar, dependsOn: classes) {
-	classifier = "sources"
+	archiveClassifier = "sources"
 	from sourceSets.main.allSource
 }
 // Maven Central deployment ////////////////////////////////////////////////////////////////////////////////////////////
@@ -347,36 +373,36 @@ task dockerBuildImage(type: DockerBuildImage) {
 	]
 	dockerFile = project.file("ci${File.separator}docker${File.separator}Dockerfile")
 	imageId = "emcmongoose/${project.name}".toString()
-	tags = [
+	images = [
 		"emcmongoose/${project.name}:${version}",
 		"emcmongoose/${project.name}:testing",
 	]
+	network = "host"
 }
 task dockerPushProductionImage(type: DockerPushImage) {
-	imageName = "emcmongoose/${project.name}".toString()
-	tag = "emcmongoose/${project.name}:${version}".toString()
+	images.add("emcmongoose/${project.name}".toString())
+	images.add("emcmongoose/${project.name}:${version}".toString())
 }
 task dockerPushTestingImage(type: DockerPushImage, dependsOn: dockerBuildImage) {
-	imageName = "emcmongoose/${project.name}".toString()
-	tag = "emcmongoose/${project.name}:testing".toString()
+	images.add("emcmongoose/${project.name}".toString())
+	images.add("emcmongoose/${project.name}:testing".toString())
 }
 // Robot Framework /////////////////////////////////////////////////////////////////////////////////////////////////////
 task dockerBuildImageRobotest(type: DockerBuildImage) {
 	inputDir = rootProject.projectDir
 	dockerFile = project.file("ci${File.separator}docker${File.separator}Dockerfile.robotest")
 	imageId = "emcmongoose/mongoose-robotest"
-	tags = [
+	images = [
 		"emcmongoose/mongoose-robotest:${version}",
 	]
+	network = "host"
 }
 task dockerCreateContainerRobotest(type: DockerCreateContainer, dependsOn: [dockerBuildImage, dockerBuildImageRobotest]) {
 	attachStderr = true
 	attachStdout = true
 	//autoRemove = true
-	binds = [
-		"${rootProject.buildDir}": "/root/mongoose/build",
-		"/var/run/docker.sock"   : "/var/run/docker.sock",
-	]
+	volumes.add("${rootProject.buildDir}": "/root/mongoose/build")
+	volumes.add("/var/run/docker.sock"   : "/var/run/docker.sock")
 	envVars = [
 		"HOST_WORKING_DIR": rootProject.projectDir.absolutePath,
 		"BASE_VERSION"    : depVersion.mongooseBase,
@@ -386,7 +412,6 @@ task dockerCreateContainerRobotest(type: DockerCreateContainer, dependsOn: [dock
 		"TEST"            : System.getenv("TEST"),
 	]
 	imageId = dockerBuildImageRobotest.getImageId()
-	network = "host"
 	tty = true
 	doLast {
 		println "Created the container for the ${System.env.SUITE}.${System.env.TEST} test"
@@ -397,7 +422,7 @@ task dockerStartContainerRobotest(type: DockerStartContainer, dependsOn: dockerC
 }
 task robotest(type: DockerWaitContainer, dependsOn: dockerStartContainerRobotest) {
 	targetContainerId dockerCreateContainerRobotest.getContainerId()
-	timeout = 600 // 10 min w/o output -> fail on Travis CI
+	timeout = java.time.Duration.ofMinutes(10) // 10 min w/o output -> fail on Travis CI
 	doLast {
 		if(0 != exitCode) {
 			throw new GradleException("Some robotests FAILED")
