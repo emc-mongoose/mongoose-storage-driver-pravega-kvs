@@ -1,15 +1,5 @@
 package com.emc.mongoose.storage.driver.pravega.kvs;
 
-import static com.emc.mongoose.base.Exceptions.throwUncheckedIfInterrupted;
-import static com.emc.mongoose.base.item.op.Operation.SLASH;
-import static com.emc.mongoose.base.item.op.Operation.Status.FAIL_IO;
-import static com.emc.mongoose.base.item.op.Operation.Status.FAIL_UNKNOWN;
-import static com.emc.mongoose.base.item.op.Operation.Status.SUCC;
-import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.MAX_BACKOFF_MILLIS;
-
-import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.MAX_KVP_VALUE;
-import static com.github.akurilov.commons.lang.Exceptions.throwUnchecked;
-
 import com.emc.mongoose.base.config.IllegalConfigurationException;
 import com.emc.mongoose.base.data.DataInput;
 import com.emc.mongoose.base.item.DataItem;
@@ -22,33 +12,12 @@ import com.emc.mongoose.base.logging.LogUtil;
 import com.emc.mongoose.base.logging.Loggers;
 import com.emc.mongoose.base.storage.Credential;
 import com.emc.mongoose.storage.driver.coop.CoopStorageDriverBase;
-import com.emc.mongoose.base.item.op.Operation.Status;
-
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTClientCreateFunction;
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTCreateFunction;
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTFactoryCreateFunction;
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.ScopeCreateFunction;
 import com.emc.mongoose.storage.driver.pravega.kvs.io.DataItemSerializer;
 import com.github.akurilov.confuse.Config;
-
-import java.io.EOFException;
-import java.io.IOException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.atomic.AtomicInteger;
-
-
 import io.pravega.client.ClientConfig;
 import io.pravega.client.KeyValueTableFactory;
 import io.pravega.client.control.impl.Controller;
@@ -404,13 +373,13 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         var i = from;
         switch (opType) {
             case NOOP:
-                for (; i < to && submutNoop(ops.get(i)); i++) ;
+                for (; i < to && submitNoop(ops.get(i)); i++) ;
                 return i - from;
             case CREATE:
                 for (; i < to && submitCreate(ops.get(i)); i++) ;
                 return i - from;
             case READ:
-                for (var i = from; i < to && submitRead(ops.get(i)); i++) ;
+                for (; i < to && submitRead(ops.get(i)); i++) ;
                 return i - from;
             default:
                 throw new AssertionError("Unexpected operation type: " + opType);
