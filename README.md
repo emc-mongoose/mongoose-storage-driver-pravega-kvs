@@ -196,7 +196,6 @@ Note that the Pravega storage driver depends on the
 extension so it should be also put into the `ext` directory
 3. Build and install the corresponding Pravega version:
 ```bash
-./gradlew pravegaExtract
 ./gradlew pravegaDistInstall
 ```
 4. Run the Pravega standalone node:

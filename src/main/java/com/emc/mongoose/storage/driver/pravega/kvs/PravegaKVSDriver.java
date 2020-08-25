@@ -332,8 +332,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                 case CREATE:
                     return submitCreate(op);
                 case READ:
-                    submitRead(op);
-                    break;
+                    return submitRead(op);
                 case UPDATE:
                 case DELETE:
                 case LIST:
@@ -467,11 +466,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                 KVTFactoryCreateFunctionImpl::new);
             // create the kvt factory if necessary
             val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
-
-            val kvTable = kvtFactory.forKeyValueTable(kvtName,
-                new UTF8StringSerializer(),
-                new UTF8StringSerializer(),
-                KeyValueTableClientConfiguration.builder().build());
+            val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientCreateFunctionImpl::new);
+            KeyValueTable<String, I> kvTable = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
 
             // isn't used currently
             val key = kvpOp.item().name();
@@ -480,7 +476,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             if (concurrencyThrottle.tryAcquire()) {
                 kvpOp.startRequest();
                 // read by key
-                val tableEntryFuture = kvTable.get(/*family*/"", /*key*/ "a");
+                val tableEntryFuture = kvTable.get(/*family*/null, /*key*/ key);
                 val kvp = tableEntryFuture.get(controlApiTimeoutMillis, MILLISECONDS);
                 if (kvp == null) { // can kvp be null ???
                     //completeOperation(kvpOp, ...);
@@ -489,7 +485,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                     kvpOp.finishRequest();
                 } catch (final IllegalStateException ignored) {
                 }
-                val bytesDone = new UTF8StringSerializer().serialize(kvp.getValue()).remaining();
+                // TODO: cash
+                val bytesDone = new DataItemSerializer(false,false).serialize(kvp.getValue()).remaining();
                 tableEntryFuture.handle((tableEntry, thrown) -> handleGetFuture(kvpOp, thrown, bytesDone));
             }
         } catch (final InterruptedException | ExecutionException | TimeoutException e) {
