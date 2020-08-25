@@ -75,7 +75,6 @@ java -jar mongoose-base-<BASE_VERSION>.jar \
     --storage-net-node-addrs=<NODE_IP_ADDRS> \
     --storage-net-node-port=9090 \
     --load-batch-size=100 \
-    --storage-driver-limit-queue-input=10000 \
     ...
 ```
 
@@ -90,7 +89,6 @@ docker run \
     --storage-namespace=scope1 \
     --storage-net-node-addrs=<NODE_IP_ADDRS> \
     --load-batch-size=100 \
-    --storage-driver-limit-queue-input=10000 \
     ...
 ```
 
@@ -116,7 +114,6 @@ docker run \
     --storage-net-node-addrs=<NODE_IP_ADDRS> \
     --storage-namespace=scope1 \
     --load-batch-size=100 \
-    --storage-driver-limit-queue-input=10000 \
     ...
 ```
 
@@ -124,15 +121,20 @@ docker run \
 
 ## 4.1. Specific Options
 
-| Name                               | Type            | Default Value | Description                                      |
-|:-----------------------------------|:----------------|:--------------|:-------------------------------------------------|
-| storage-driver-control-scope       | boolean         | true          | Allow to try to create scope
-| storage-driver-control-timeoutMillis | integer       | 2000         | The timeout for any Pravega Controller API call
-| storage-driver-event-key-enabled   | boolean         | false         | Specifies if Mongoose should generate its own routing key during the events creation
-| storage-driver-event-key-count     | integer         | 0             | Specifies a max count of unique routing keys to use during the events creation (may be considered as a routing key period). 0 value means to use unique routing key for each new event
-| storage-net-node-addrs             | list of strings | 127.0.0.1     | The list of the Pravega storage nodes to use for the load
-| storage-net-node-port              | integer         | 9090          | The default port of the Pravega storage nodes, should be explicitly set to 9090 (the value used by Pravega by default)
-| storage-net-maxConnPerSegmentstore | integer         | 5             | The default amount of connections per each Pravega Segmentstore
+| Name                                 | Type            | Default Value | Description                                      |
+|:-------------------------------------|:----------------|:--------------|:-------------------------------------------------|
+| storage-driver-control-scope         | boolean         | true          | Allow to try to create scope
+| storage-driver-control-kvt           | boolean         | true          | Allow to try to create kvt
+| storage-driver-control-timeoutMillis | integer         | 5000          | The timeout for any Pravega Controller API call
+| storage-driver-event-key-enabled     | boolean         | false         | Specifies if Mongoose should generate its own routing key during the events creation
+| storage-driver-event-key-count       | integer         | 0             | Specifies a max count of unique routing keys to use during the events creation (may be considered as a routing key period). 0 value means to use unique routing key for each new event
+| storage-net-node-addrs               | list of strings | 127.0.0.1     | The list of the Pravega storage nodes to use for the load
+| storage-net-node-port                | integer         | 9090          | The default port of the Pravega storage nodes, should be explicitly set to 9090 (the value used by Pravega by default)
+| storage-net-maxConnPerSegmentstore   | integer         | 5             | The default amount of connections per each Pravega Segmentstore
+| storage-driver-hashing-key-enabled   | boolean         | false         | Specifies if Mongoose should use Key Families
+| storage-driver-hashing-key-count     | long            | 0             | The default amount of Key Families
+| storage-driver-scaling-partitions    | int             | 1             | The default amount of partitions (Table segments) in KVT
+
 
 ## 4.2. Tuning
 

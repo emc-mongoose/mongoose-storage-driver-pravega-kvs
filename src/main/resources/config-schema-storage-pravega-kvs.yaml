@@ -3,11 +3,14 @@ storage:
   driver:
     control:
       scope: boolean
+      kvt: boolean
       timeoutMillis: long
     hashing:
       key:
         enabled: boolean
         count: long
+    scaling:
+      partitions: int
   namespace: string
   net:
     bindBacklogSize: int
