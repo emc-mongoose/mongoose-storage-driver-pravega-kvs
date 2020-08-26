@@ -16,6 +16,7 @@ import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTClientCreateFunction
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTCreateFunction;
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.KVTFactoryCreateFunction;
 import com.emc.mongoose.storage.driver.pravega.kvs.cache.ScopeCreateFunction;
+import com.emc.mongoose.storage.driver.pravega.kvs.io.ByteBufferSerializer;
 import com.emc.mongoose.storage.driver.pravega.kvs.io.DataItemSerializer;
 import com.github.akurilov.confuse.Config;
 import io.pravega.client.ClientConfig;
@@ -27,6 +28,7 @@ import io.pravega.client.stream.impl.UTF8StringSerializer;
 import io.pravega.client.tables.KeyValueTable;
 import io.pravega.client.tables.KeyValueTableClientConfiguration;
 import io.pravega.client.tables.KeyValueTableConfiguration;
+import io.pravega.client.tables.TableEntry;
 import lombok.Value;
 import lombok.val;
 import org.apache.logging.log4j.Level;
@@ -40,8 +42,16 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -55,7 +65,7 @@ import static com.emc.mongoose.base.item.op.Operation.Status.*;
 import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.MAX_BACKOFF_MILLIS;
 import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.MAX_KVP_VALUE;
 import static com.github.akurilov.commons.lang.Exceptions.throwUnchecked;
-
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     extends CoopStorageDriverBase<I, O> {
@@ -168,8 +178,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     }
 
     @Value
-    final class KVTClientCreateFunctionImpl
-        implements KVTClientCreateFunction {
+    final class KVTClientForCreateOpCreateFunctionImpl
+            implements KVTClientCreateFunction {
 
         KeyValueTableFactory kvtFactory;
 
@@ -179,6 +189,20 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                 .build();
             return kvtFactory.forKeyValueTable(kvtName, new UTF8StringSerializer(),
                 new DataItemSerializer(false, false), kvtConfig);
+        }
+    }
+
+    @Value
+    final class KVTClientForReadOpCreateFunctionImpl<T>
+        implements KVTClientCreateFunction {
+
+        KeyValueTableFactory kvtFactory;
+
+        @Override
+        public final KeyValueTable apply(final String kvtName) {
+            val kvtConfig = KeyValueTableClientConfiguration.builder()
+                .build();
+            return kvtFactory.forKeyValueTable(kvtName, new UTF8StringSerializer(), new ByteBufferSerializer(), kvtConfig);
         }
     }
 
@@ -422,8 +446,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             KVTFactoryCreateFunctionImpl::new);
         // create the kvt factory if necessary
         val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
-        val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientCreateFunctionImpl::new);
-        // TODO: probably should be thread local
+        val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientForCreateOpCreateFunctionImpl::new);
+        //TODO: probably should be thread local
         KeyValueTable<String, I> kvt = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
         val kvpKeyFamily = (null != hashingKeyFunc) ? hashingKeyFunc.apply(op.item()) : null;
         // TODO: see if StringBuilder faster
@@ -477,55 +501,46 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
 
     private boolean submitRead(final O kvpOp) {
-        try {
-            val nodeAddr = kvpOp.nodeAddr();
-            val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
-            val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
-            val kvtName = extractKVTName(kvpOp.srcPath());
-            // create the kvt factory create function if necessary
-            val kvtFactoryCreateFunc = kvtFactoryCreateFuncCache.computeIfAbsent(
-                clientConfig,
-                KVTFactoryCreateFunctionImpl::new);
-            // create the kvt factory if necessary
-            val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
-            val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientCreateFunctionImpl::new);
-            KeyValueTable<String, I> kvTable = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
+        val nodeAddr = kvpOp.nodeAddr();
+        val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
+        val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
+        val kvtName = extractKVTName(kvpOp.srcPath());
+        // create the kvt factory create function if necessary
+        val kvtFactoryCreateFunc = kvtFactoryCreateFuncCache.computeIfAbsent(
+            clientConfig,
+            KVTFactoryCreateFunctionImpl::new);
+        // create the kvt factory if necessary
+        val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
+        val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(
+            kvtFactory,
+            KVTClientForReadOpCreateFunctionImpl::new);
+        KeyValueTable<String, ByteBuffer> kvTable = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
 
             val keyFamilyAndKey = kvpOp.item().name().split("/");
             val kvpKeyFamily = keyFamilyAndKey[1];
             val kvpKey = keyFamilyAndKey[2];
             //val family = extractKVFName(key);
 
-            if (concurrencyThrottle.tryAcquire()) {
-                kvpOp.startRequest();
-                // read by key
-                val tableEntryFuture = kvTable.get(/*family*/null, /*key*/ kvpKey);
-                val kvp = tableEntryFuture.get(controlApiTimeoutMillis, MILLISECONDS);
-                if (kvp == null) { // can kvp be null ???
-                    //completeOperation(kvpOp, ...);
-                }
-                try {
-                    kvpOp.finishRequest();
-                } catch (final IllegalStateException ignored) {
-                }
-                // TODO: cash
-                val bytesDone = new DataItemSerializer(false,false).serialize(kvp.getValue()).remaining();
-                tableEntryFuture.handle((tableEntry, thrown) -> handleGetFuture(kvpOp, thrown, bytesDone));
+        if (concurrencyThrottle.tryAcquire()) {
+            kvpOp.startRequest();
+            // read by key
+            val tableEntryFuture = kvTable.get(/*family*/null, /*key*/ key);
+            try {
+                kvpOp.finishRequest();
+            } catch (final IllegalStateException ignored) {
             }
-        } catch (final InterruptedException | ExecutionException | TimeoutException e) {
-            e.printStackTrace();
-            throw new AssertionError();
+            tableEntryFuture.handle((tableEntry, thrown) -> handleGetFuture(kvpOp, tableEntry, thrown));
         }
-
         return true;
     }
 
-    private Object handleGetFuture(final O op, final Throwable thrown, final long transferSize) {
+    private Object handleGetFuture(final O op, final TableEntry<String, ByteBuffer> tableEntry, final Throwable thrown) {
         try {
             if (null == thrown) {
                 op.startResponse();
                 op.finishResponse();
-                op.countBytesDone(transferSize);
+                val bytesDone = tableEntry.getValue().remaining();
+                op.countBytesDone(bytesDone);
                 completeOperation(op, SUCC);
             } else {
                 completeOperation(op, FAIL_UNKNOWN);
