@@ -131,8 +131,9 @@ docker run \
 | storage-net-node-addrs               | list of strings | 127.0.0.1     | The list of the Pravega storage nodes to use for the load
 | storage-net-node-port                | integer         | 9090          | The default port of the Pravega storage nodes, should be explicitly set to 9090 (the value used by Pravega by default)
 | storage-net-maxConnPerSegmentstore   | integer         | 5             | The default amount of connections per each Pravega Segmentstore
-| storage-driver-hashing-key-enabled   | boolean         | false         | Specifies if Mongoose should use Key Families
-| storage-driver-hashing-key-count     | long            | 0             | The default amount of Key Families
+| storage-driver-family-key-enabled    | boolean         | false         | Specifies if Mongoose should use Key Families
+| storage-driver-family-key-count      | long            | 0             | The default amount of Key Families
+| storage-driver-family-key-allow-empty| boolean         | false         | Specifies if Mongoose should allow KVP w/o Key Families
 | storage-driver-scaling-partitions    | int             | 1             | The default amount of partitions (Table segments) in KVT
 
 

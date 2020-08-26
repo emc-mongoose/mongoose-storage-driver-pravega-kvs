@@ -5,10 +5,12 @@ storage:
       scope: true
       kvt: true
       timeoutMillis: 5000
-    hashing:
+    family:
       key:
         enabled: false
         count: 0
+        allow:
+          empty: false
     scaling:
       partitions: 1
   namespace: goose

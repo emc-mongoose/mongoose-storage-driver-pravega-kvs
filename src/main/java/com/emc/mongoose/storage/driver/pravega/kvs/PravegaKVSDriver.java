@@ -35,8 +35,18 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.emc.mongoose.base.Exceptions.throwUncheckedIfInterrupted;
@@ -45,7 +55,7 @@ import static com.emc.mongoose.base.item.op.Operation.Status.*;
 import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.MAX_BACKOFF_MILLIS;
 import static com.emc.mongoose.storage.driver.pravega.kvs.PravegaKVSConstants.MAX_KVP_VALUE;
 import static com.github.akurilov.commons.lang.Exceptions.throwUnchecked;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
+
 
 public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     extends CoopStorageDriverBase<I, O> {
@@ -62,6 +72,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     private final boolean controlKVTFlag;
     private final ScheduledExecutorService bgExecutor;
     private final AtomicInteger rrc = new AtomicInteger(0);
+    private final boolean allowEmptyFamily;
 
     // caches allowing the lazy creation of the necessary things:
     private final Map<Controller, ScopeCreateFunction> scopeCreateFuncCache = new ConcurrentHashMap<>();
@@ -128,7 +139,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                             kvtConfig);
                     } else {
                         Loggers.MSG.info(
-                                "KVT \"{}\" was not created, may be already existing before", kvtName);
+                            "KVT \"{}\" was not created, may be already existing before", kvtName);
                         //TODO: once it is supported
                         //scaleToPartitionCount(
                         //        controller, controlApiTimeoutMillis, scopeName, kvtName, scalingPolicy);
@@ -158,16 +169,16 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
     @Value
     final class KVTClientCreateFunctionImpl
-            implements KVTClientCreateFunction {
+        implements KVTClientCreateFunction {
 
         KeyValueTableFactory kvtFactory;
 
         @Override
         public final KeyValueTable apply(final String kvtName) {
             val kvtConfig = KeyValueTableClientConfiguration.builder()
-                    .build();
+                .build();
             return kvtFactory.forKeyValueTable(kvtName, new UTF8StringSerializer(),
-                    new DataItemSerializer(false, false), kvtConfig);
+                new DataItemSerializer(false, false), kvtConfig);
         }
     }
 
@@ -205,11 +216,13 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val nodeConfig = netConfig.configVal("node");
         this.nodePort = nodeConfig.intVal("port");
         val endpointAddrList = nodeConfig.listVal("addrs");
-        val hashingConfig = driverConfig.configVal("hashing");
-        val createHashingKeysConfig = hashingConfig.configVal("key");
-        val createHashingKeys = createHashingKeysConfig.boolVal("enabled");
-        val createHashingKeysPeriod = createHashingKeysConfig.longVal("count");
-        this.hashingKeyFunc = createHashingKeys ? new HashingKeyFunctionImpl<>(createHashingKeysPeriod) : null;
+        val familyConfig = driverConfig.configVal("family");
+        val createFamilyKeysConfig = familyConfig.configVal("key");
+        val createFamilyKeys = createFamilyKeysConfig.boolVal("enabled");
+        this.allowEmptyFamily = createFamilyKeysConfig.boolVal("allow-empty");
+        val familyKeysAmount = allowEmptyFamily ? createFamilyKeysConfig.longVal("count") + 1 :
+            createFamilyKeysConfig.longVal("count");
+        this.hashingKeyFunc = createFamilyKeys ? new HashingKeyFunctionImpl<>(familyKeysAmount) : null;
         this.endpointAddrs = endpointAddrList.toArray(new String[endpointAddrList.size()]);
         this.requestAuthTokenFunc = null; // do not use
         this.requestNewPathFunc = null; // do not use
@@ -410,8 +423,17 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         // create the kvt factory if necessary
         val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
         val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientCreateFunctionImpl::new);
-        //TODO: probably should be thread local
+        // TODO: probably should be thread local
         KeyValueTable<String, I> kvt = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
+        val kvpKeyFamily = (null != hashingKeyFunc) ? hashingKeyFunc.apply(op.item()) : null;
+        // TODO: see if StringBuilder faster
+        // TODO: check how affects perf
+        val kvpKey = op.item().name();
+        if ((null == kvpKeyFamily) || (allowEmptyFamily && kvpKeyFamily.equals("0"))) {
+            op.item().name("/"+kvpKey);
+        } else {
+            op.item().name(kvpKeyFamily+"/"+kvpKey);
+        }
         try {
             val kvpValueSize = op.item().size();
             if (kvpValueSize > MAX_KVP_VALUE) {
@@ -422,7 +444,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             } else {
                 if (concurrencyThrottle.tryAcquire()) {
                     op.startRequest();
-                    val kvtPutFuture = kvt.put(null, op.item().name(), op.item()); // first parameter is key family
+                    val kvtPutFuture = kvt.put(kvpKeyFamily, kvpKey, op.item());
                     try {
                         op.finishRequest();
                     } catch (final IllegalStateException ignored) {
@@ -443,10 +465,10 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             if (null != thrown) {
                 completeOperation(op, FAIL_UNKNOWN);
             }
-                op.startResponse();
-                op.finishResponse();
-                op.countBytesDone(transferSize);
-                completeOperation(op, SUCC);
+            op.startResponse();
+            op.finishResponse();
+            op.countBytesDone(transferSize);
+            completeOperation(op, SUCC);
         } finally {
             concurrencyThrottle.release();
         }
@@ -469,14 +491,15 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientCreateFunctionImpl::new);
             KeyValueTable<String, I> kvTable = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
 
-            // isn't used currently
-            val key = kvpOp.item().name();
-            val family = extractKVFName(key);
+            val keyFamilyAndKey = kvpOp.item().name().split("/");
+            val kvpKeyFamily = keyFamilyAndKey[1];
+            val kvpKey = keyFamilyAndKey[2];
+            //val family = extractKVFName(key);
 
             if (concurrencyThrottle.tryAcquire()) {
                 kvpOp.startRequest();
                 // read by key
-                val tableEntryFuture = kvTable.get(/*family*/null, /*key*/ key);
+                val tableEntryFuture = kvTable.get(/*family*/null, /*key*/ kvpKey);
                 val kvp = tableEntryFuture.get(controlApiTimeoutMillis, MILLISECONDS);
                 if (kvp == null) { // can kvp be null ???
                     //completeOperation(kvpOp, ...);
