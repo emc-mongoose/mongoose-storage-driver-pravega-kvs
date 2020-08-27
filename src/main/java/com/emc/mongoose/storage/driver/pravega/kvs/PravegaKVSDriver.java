@@ -179,7 +179,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
     @Value
     final class KVTClientForCreateOpCreateFunctionImpl
-            implements KVTClientCreateFunction {
+        implements KVTClientCreateFunction {
 
         KeyValueTableFactory kvtFactory;
 
@@ -454,9 +454,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         // TODO: check how affects perf
         val kvpKey = op.item().name();
         if ((null == kvpKeyFamily) || (allowEmptyFamily && kvpKeyFamily.equals("0"))) {
-            op.item().name("/"+kvpKey);
+            op.item().name("/" + kvpKey);
         } else {
-            op.item().name(kvpKeyFamily+"/"+kvpKey);
+            op.item().name(kvpKeyFamily + "/" + kvpKey);
         }
         try {
             val kvpValueSize = op.item().size();
@@ -504,7 +504,14 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val nodeAddr = kvpOp.nodeAddr();
         val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
         val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
-        val kvtName = extractKVTName(kvpOp.srcPath());
+        val kvtNameAndKeyFamily = kvpOp.srcPath().split("/");
+        val kvtName = kvtNameAndKeyFamily[0]; //extractKVTName(kvpOp.srcPath());
+        String kvpKeyFamily = null;
+        if (kvtNameAndKeyFamily.length > 1) {
+            kvpKeyFamily = kvtNameAndKeyFamily[1];
+        }
+        val kvpKey = kvpOp.item().name();
+
         // create the kvt factory create function if necessary
         val kvtFactoryCreateFunc = kvtFactoryCreateFuncCache.computeIfAbsent(
             clientConfig,
@@ -516,15 +523,13 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             KVTClientForReadOpCreateFunctionImpl::new);
         KeyValueTable<String, ByteBuffer> kvTable = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
 
-            val keyFamilyAndKey = kvpOp.item().name().split("/");
-            val kvpKeyFamily = keyFamilyAndKey[1];
-            val kvpKey = keyFamilyAndKey[2];
-            //val family = extractKVFName(key);
+
+        //val family = extractKVFName(key);
 
         if (concurrencyThrottle.tryAcquire()) {
             kvpOp.startRequest();
             // read by key
-            val tableEntryFuture = kvTable.get(/*family*/null, /*key*/ key);
+            val tableEntryFuture = kvTable.get(/*family*/kvpKeyFamily, /*key*/ kvpKey);
             try {
                 kvpOp.finishRequest();
             } catch (final IllegalStateException ignored) {
