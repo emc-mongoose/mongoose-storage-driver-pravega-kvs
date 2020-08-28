@@ -112,7 +112,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                         Loggers.MSG.trace("Scope \"{}\" was created", scopeName);
                     } else {
                         Loggers.MSG.info(
-                            "Scope \"{}\" was not created, may be already existing before", scopeName);
+                            "Scope \"{}\" was not created, likely created earlier", scopeName);
                     }
                 } catch (final InterruptedException e) {
                     throwUnchecked(e);
@@ -149,7 +149,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                             kvtConfig);
                     } else {
                         Loggers.MSG.info(
-                            "KVT \"{}\" was not created, may be already existing before", kvtName);
+                            "KVT \"{}\" was not created, likely created earlier", kvtName);
                         //TODO: once it is supported
                         //scaleToPartitionCount(
                         //        controller, controlApiTimeoutMillis, scopeName, kvtName, scalingPolicy);

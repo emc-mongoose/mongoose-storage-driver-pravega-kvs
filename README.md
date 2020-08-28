@@ -147,7 +147,15 @@ This parameter can largely affect the performance, but it also increases network
 See the [design notes](https://github.com/emc-mongoose/mongoose-storage-driver-coop#design)
 
 # 5. Usage
-TBD
+
+## 5.1 Key families
+
+Key families are disabled by default. 
+
+To do creates with Key families one needs to enable it and set the amount of keys (`family-key` parameters). 
+If also having an empty family during creates is desired, then allow-empty flag can be used. 
+
+Reads do not require any additional flags for key families as long as the input-file is used.
 
 
 # 6. Open Issues
