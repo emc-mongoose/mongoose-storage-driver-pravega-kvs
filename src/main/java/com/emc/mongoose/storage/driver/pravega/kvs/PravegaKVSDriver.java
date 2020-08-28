@@ -39,8 +39,10 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -83,6 +85,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     private final ScheduledExecutorService bgExecutor;
     private final AtomicInteger rrc = new AtomicInteger(0);
     private final boolean allowEmptyFamily;
+    private final boolean useMultiKeyOperations;
 
     // caches allowing the lazy creation of the necessary things:
     private final Map<Controller, ScopeCreateFunction> scopeCreateFuncCache = new ConcurrentHashMap<>();
@@ -247,6 +250,11 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val familyKeysAmount = allowEmptyFamily ? createFamilyKeysConfig.longVal("count") + 1 :
             createFamilyKeysConfig.longVal("count");
         this.hashingKeyFunc = createFamilyKeys ? new HashingKeyFunctionImpl<>(familyKeysAmount) : null;
+        val multiKeyConfig = driverConfig.configVal("family-key");
+        this.useMultiKeyOperations = multiKeyConfig.boolVal("enabled");
+        if ((useMultiKeyOperations) && (null == hashingKeyFunc)) {
+            throw new AssertionError("Multi key operations are only supported when key families are enabled");
+        }
         this.endpointAddrs = endpointAddrList.toArray(new String[endpointAddrList.size()]);
         this.requestAuthTokenFunc = null; // do not use
         this.requestNewPathFunc = null; // do not use
@@ -422,10 +430,96 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         }
     }
 
+    protected final int submitMultiKey(final List<O> ops, final int from, final int to)
+        throws IllegalStateException {
+
+        val anyOp = ops.get(from);
+        val opType = anyOp.type();
+        var i = from;
+        Map<String, I> pairs = new HashMap<>();
+        for (O op: ops) {
+            pairs.put(new Entry<String, I>(op.item().name(),op.item()));
+        }
+        //we shouldn't throw away the whole batch
+        switch (opType) {
+            case NOOP:
+
+                return to - from;
+            case CREATE:
+                for (; i < to && submitCreate(ops.get(i)); i++) ;
+                return to - from;
+            case READ:
+                for (; i < to && submitRead(ops.get(i)); i++) ;
+                return to - from;
+            default:
+                throw new AssertionError("Unexpected operation type: " + opType);
+        }
+    }
+
     @Override
     protected final int submit(final List<O> ops)
         throws IllegalStateException {
-        return submit(ops, 0, ops.size());
+        return useMultiKeyOperations ?
+            submitMultiKey(ops, 0, ops.size()) :
+            submit(ops, 0, ops.size());
+    }
+
+    private boolean submitMultiKeyCreate(final List<Map.Entry<String, I>> pairs, final List<O> ops) {
+        val anyOp = ops.get(0);
+        val nodeAddr = anyOp.nodeAddr();
+        val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
+        val kvtName = extractKVTName(anyOp.dstPath());
+        val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
+
+        val controller = controllerCache.computeIfAbsent(clientConfig, this::createController);
+        val scopeCreateFunc = scopeCreateFuncCache.computeIfAbsent(controller, ScopeCreateFunctionImpl::new);
+        // create the scope if necessary
+        val kvtCreateFunc = kvtCreateFuncCache.computeIfAbsent(scopeName, scopeCreateFunc);
+        scopeKVTsCache.computeIfAbsent(scopeName, this::createInstanceCache).computeIfAbsent(kvtName, kvtCreateFunc);
+
+        // create the kvt factory create function if necessary
+        val kvtFactoryCreateFunc = kvtFactoryCreateFuncCache.computeIfAbsent(
+            clientConfig,
+            KVTFactoryCreateFunctionImpl::new);
+        // create the kvt factory if necessary
+        val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
+        val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientForCreateOpCreateFunctionImpl::new);
+        //TODO: probably should be thread local
+        KeyValueTable<String, I> kvt = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
+        val kvpKeyFamily = hashingKeyFunc.apply(anyOp.item());
+        // TODO: see if StringBuilder faster
+        // TODO: check how affects perf
+        /*val kvpKey = op.item().name();
+        if ((null == kvpKeyFamily) || (allowEmptyFamily && kvpKeyFamily.equals("0"))) {
+            op.item().name("/" + kvpKey);
+        } else {
+            op.item().name(kvpKeyFamily + "/" + kvpKey);
+        }*/
+        try {
+            val kvpValueSize = anyOp.item().size();
+            if (kvpValueSize > MAX_KVP_VALUE) {
+                Loggers.ERR.warn("{}: KVP value size cannot exceed 1016KB ", stepId);
+                completeOperation(anyOp, FAIL_IO);
+            } else if (kvpValueSize < 0) {
+                completeOperation(anyOp, FAIL_IO);
+            } else {
+                if (concurrencyThrottle.tryAcquire()) {
+                    //loop
+                    //op.startRequest();
+                    val kvtPutFuture = kvt.putAll(kvpKeyFamily, pairs);
+                    try {
+                        //op.finishRequest();
+                    } catch (final IllegalStateException ignored) {
+                    }
+                    kvtPutFuture.handle((version, thrown) -> handleMultiKeyPutFuture(ops, thrown, kvpValueSize));
+                } else {
+                    return false;
+                }
+            }
+        } catch (final IOException e) {
+            throw new AssertionError(e);
+        }
+        return true;
     }
 
     private boolean submitCreate(O op) {
@@ -485,6 +579,21 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     }
 
     protected Object handlePutFuture(final O op, final Throwable thrown, final long transferSize) {
+        try {
+            if (null != thrown) {
+                completeOperation(op, FAIL_UNKNOWN);
+            }
+            op.startResponse();
+            op.finishResponse();
+            op.countBytesDone(transferSize);
+            completeOperation(op, SUCC);
+        } finally {
+            concurrencyThrottle.release();
+        }
+        return null;
+    }
+
+    protected Object handleMultiKeyPutFuture(final List<O> ops, final Throwable thrown, final long transferSize) {
         try {
             if (null != thrown) {
                 completeOperation(op, FAIL_UNKNOWN);
