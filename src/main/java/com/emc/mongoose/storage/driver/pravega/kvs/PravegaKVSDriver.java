@@ -461,8 +461,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         try {
             val kvpValueSize = op.item().size();
             if (kvpValueSize > MAX_KVP_VALUE) {
-                Loggers.ERR.warn("{}: KVP value size cannot exceed 1016KB ", stepId);
                 completeOperation(op, FAIL_IO);
+                throw new AssertionError(stepId + ": KVP value size cannot exceed 1016KB ");
             } else if (kvpValueSize < 0) {
                 completeOperation(op, FAIL_IO);
             } else {
