@@ -196,11 +196,13 @@ Note that the Pravega storage driver depends on the
 extension so it should be also put into the `ext` directory
 3. Build and install the corresponding Pravega version:
 ```bash
-./gradlew pravegaExtract
+./gradlew pravegaDistInstall
 ```
 4. Run the Pravega standalone node:
 ```bash
-build/pravega_/bin/pravega-standalone
+cd build/pravega/build/distributions/
+tar -xzf pravega-<version>.tgz
+./pravega-<version>/bin/pravega-standalone
 ```
 4. Run Mongoose's default scenario with some specific command-line arguments:
 ```bash
