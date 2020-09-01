@@ -5,10 +5,12 @@ storage:
       scope: boolean
       kvt: boolean
       timeoutMillis: long
-    hashing:
+    family:
       key:
         enabled: boolean
         count: long
+        allow:
+          empty: boolean
     scaling:
       partitions: int
   namespace: string
