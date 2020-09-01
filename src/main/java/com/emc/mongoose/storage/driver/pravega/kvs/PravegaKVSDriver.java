@@ -167,7 +167,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     }
 
     @Value
-    final class KVTForCreateClientCreateFunctionImpl
+    final class KVTClientForCreateOpCreateFunctionImpl
             implements KVTClientCreateFunction {
 
         KeyValueTableFactory kvtFactory;
@@ -182,7 +182,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     }
 
     @Value
-    final class KVTForReadClientCreateFunctionImpl<T>
+    final class KVTClientForReadOpCreateFunctionImpl<T>
         implements KVTClientCreateFunction {
 
         KeyValueTableFactory kvtFactory;
@@ -433,7 +433,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             KVTFactoryCreateFunctionImpl::new);
         // create the kvt factory if necessary
         val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
-        val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTForCreateClientCreateFunctionImpl::new);
+        val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientForCreateOpCreateFunctionImpl::new);
         //TODO: probably should be thread local
         KeyValueTable<String, I> kvt = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
         try {
@@ -491,7 +491,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
         val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(
             kvtFactory,
-            KVTForReadClientCreateFunctionImpl::new);
+            KVTClientForReadOpCreateFunctionImpl::new);
         KeyValueTable<String, ByteBuffer> kvTable = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
 
         // isn't used currently
@@ -507,6 +507,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             } catch (final IllegalStateException ignored) {
             }
             tableEntryFuture.handle((tableEntry, thrown) -> handleGetFuture(kvpOp, tableEntry, thrown));
+        } else {
+            return false;
         }
         return true;
     }
