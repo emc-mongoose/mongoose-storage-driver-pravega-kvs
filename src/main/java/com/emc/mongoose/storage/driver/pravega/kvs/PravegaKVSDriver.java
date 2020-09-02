@@ -235,6 +235,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val createFamilyKeysConfig = familyConfig.configVal("key");
         val createFamilyKeys = createFamilyKeysConfig.boolVal("enabled");
         this.allowEmptyFamily = createFamilyKeysConfig.boolVal("allow-empty");
+        // if empty family is allowed we add one more family key, so that
+        // we could treat one value of family key as an empty key. E.g., key-family=0
+        // is basically null key family
         val familyKeysAmount = allowEmptyFamily ? createFamilyKeysConfig.longVal("count") + 1 :
             createFamilyKeysConfig.longVal("count");
         this.hashingKeyFunc = createFamilyKeys ? new HashingKeyFunctionImpl<>(familyKeysAmount) : null;
@@ -495,8 +498,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val nodeAddr = kvpOp.nodeAddr();
         val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
         val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
+        // op.srcPath() looks like kvtName/kvtKeyFamily. But in case family is null we get "kvtName/".
         val kvtNameAndKeyFamily = kvpOp.srcPath().split("/");
-        val kvtName = kvtNameAndKeyFamily[0]; //extractKVTName(kvpOp.srcPath());
+        val kvtName = kvtNameAndKeyFamily[0];
         String kvpKeyFamily = null;
         if (kvtNameAndKeyFamily.length > 1) {
             kvpKeyFamily = kvtNameAndKeyFamily[1];
