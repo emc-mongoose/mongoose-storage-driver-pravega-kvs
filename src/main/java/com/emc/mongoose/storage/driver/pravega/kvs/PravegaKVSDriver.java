@@ -535,6 +535,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             } catch (final IllegalStateException ignored) {
             }
             tableEntryFuture.handle((tableEntry, thrown) -> handleGetFuture(kvpOp, tableEntry, thrown));
+        } else {
+            return false;
         }
         return true;
     }
