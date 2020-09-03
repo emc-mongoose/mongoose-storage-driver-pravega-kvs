@@ -10,8 +10,8 @@ public class HashingKeyFunctionImpl<I extends DataItem>
 	long period;
 
 	@Override
-	public final String apply(final I evtItem) {
-		return Long.toString(period > 0 ? evtItem.offset() % period : evtItem.offset(), Character.MAX_RADIX);
+	public final String apply(final I kvpItem) {
+		return Long.toString(period > 0 ? kvpItem.offset() % period : kvpItem.offset(), Character.MAX_RADIX);
 	}
 
 	@Override

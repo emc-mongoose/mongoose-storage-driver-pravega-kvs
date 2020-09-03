@@ -131,8 +131,9 @@ docker run \
 | storage-net-node-addrs               | list of strings | 127.0.0.1     | The list of the Pravega storage nodes to use for the load
 | storage-net-node-port                | integer         | 9090          | The default port of the Pravega storage nodes, should be explicitly set to 9090 (the value used by Pravega by default)
 | storage-net-maxConnPerSegmentstore   | integer         | 5             | The default amount of connections per each Pravega Segmentstore
-| storage-driver-hashing-key-enabled   | boolean         | false         | Specifies if Mongoose should use Key Families
-| storage-driver-hashing-key-count     | long            | 0             | The default amount of Key Families
+| storage-driver-family-key-enabled    | boolean         | false         | Specifies if Mongoose should use Key Families
+| storage-driver-family-key-count      | long            | 0             | The default amount of Key Families
+| storage-driver-family-key-allow-empty| boolean         | false         | Specifies if Mongoose should allow KVP w/o Key Families
 | storage-driver-scaling-partitions    | int             | 1             | The default amount of partitions (Table segments) in KVT
 
 
@@ -146,9 +147,29 @@ This parameter can largely affect the performance, but it also increases network
 See the [design notes](https://github.com/emc-mongoose/mongoose-storage-driver-coop#design)
 
 # 5. Usage
-TBD
 
+## 5.1 Key families
 
+Key families are disabled by default. 
+
+To do creates with Key families one needs to enable it and set the amount of keys (`family-key` parameters). 
+If also having an empty family during creates is desired, then allow-empty flag can be used. 
+
+Reads do not require any additional flags for key families as long as the input-file is used.
+
+So, a full example with 10 key families and allowed no key family looks like this:
+
+```bash
+java -jar mongoose-base-<BASE_VERSION>.jar \
+    --storage-driver-type=pravega-kvs \
+    --storage-namespace=scope1 \
+    --storage-net-node-addrs=<NODE_IP_ADDRS> \
+    --storage-net-node-port=9090 \
+    --storage-driver-family-key-enabled \
+    --storage-driver-family-key-count=10 \
+    --storage-driver-family-key-allow-empty
+    ...
+```
 # 6. Open Issues
 
 | Issue | Description |
