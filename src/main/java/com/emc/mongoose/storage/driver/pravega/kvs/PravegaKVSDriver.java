@@ -50,15 +50,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.emc.mongoose.base.Exceptions.throwUncheckedIfInterrupted;
@@ -247,6 +238,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val createFamilyKeysConfig = familyConfig.configVal("key");
         val createFamilyKeys = createFamilyKeysConfig.boolVal("enabled");
         this.allowEmptyFamily = createFamilyKeysConfig.boolVal("allow-empty");
+        // if empty family is allowed we add one more family key, so that
+        // we could treat one value of family key as an empty key. E.g., key-family=0
+        // is basically null key family
         val familyKeysAmount = allowEmptyFamily ? createFamilyKeysConfig.longVal("count") + 1 :
             createFamilyKeysConfig.longVal("count");
         this.hashingKeyFunc = createFamilyKeys ? new HashingKeyFunctionImpl<>(familyKeysAmount) : null;
@@ -555,8 +549,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         try {
             val kvpValueSize = op.item().size();
             if (kvpValueSize > MAX_KVP_VALUE) {
-                Loggers.ERR.warn("{}: KVP value size cannot exceed 1016KB ", stepId);
                 completeOperation(op, FAIL_IO);
+                throw new AssertionError(stepId + ": KVP value size cannot exceed 1016KB ");
             } else if (kvpValueSize < 0) {
                 completeOperation(op, FAIL_IO);
             } else {
@@ -613,8 +607,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val nodeAddr = kvpOp.nodeAddr();
         val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
         val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
+        // op.srcPath() looks like kvtName/kvtKeyFamily. But in case family is null we get "kvtName/".
         val kvtNameAndKeyFamily = kvpOp.srcPath().split("/");
-        val kvtName = kvtNameAndKeyFamily[0]; //extractKVTName(kvpOp.srcPath());
+        val kvtName = kvtNameAndKeyFamily[0];
         String kvpKeyFamily = null;
         if (kvtNameAndKeyFamily.length > 1) {
             kvpKeyFamily = kvtNameAndKeyFamily[1];
@@ -644,6 +639,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             } catch (final IllegalStateException ignored) {
             }
             tableEntryFuture.handle((tableEntry, thrown) -> handleGetFuture(kvpOp, tableEntry, thrown));
+        } else {
+            return false;
         }
         return true;
     }

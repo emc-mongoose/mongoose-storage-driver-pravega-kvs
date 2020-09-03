@@ -157,7 +157,19 @@ If also having an empty family during creates is desired, then allow-empty flag 
 
 Reads do not require any additional flags for key families as long as the input-file is used.
 
+So, a full example with 10 key families and allowed no key family looks like this:
 
+```bash
+java -jar mongoose-base-<BASE_VERSION>.jar \
+    --storage-driver-type=pravega-kvs \
+    --storage-namespace=scope1 \
+    --storage-net-node-addrs=<NODE_IP_ADDRS> \
+    --storage-net-node-port=9090 \
+    --storage-driver-family-key-enabled \
+    --storage-driver-family-key-count=10 \
+    --storage-driver-family-key-allow-empty
+    ...
+```
 # 6. Open Issues
 
 | Issue | Description |
