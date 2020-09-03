@@ -1,5 +1,3 @@
-ARG BASE_VERSION
-
 FROM adoptopenjdk/openjdk11:jdk-11.0.4_11
 ADD src ./src/
 ADD gradle ./gradle/
@@ -11,9 +9,9 @@ RUN ./gradlew clean pravegaClientJars; \
     ./gradlew jar
 
 FROM emcmongoose/mongoose-base:${BASE_VERSION}
-ARG BASE_VERSION
-ARG STORAGE_DRIVER_COOP_VERSION
-ARG VERSION
+ARG BASE_VERSION=4.2.19
+ARG STORAGE_DRIVER_COOP_VERSION=4.2.20
+ARG VERSION=4.2.1
 RUN mkdir -p $HOME/.mongoose/${BASE_VERSION}/ext
 COPY --from=0 /build/libs/mongoose-storage-driver-pravega-kvs-${VERSION}.jar /tmp/
 ADD ci/docker/entrypoint_storage_driver_pravega_kvs.sh /opt/mongoose/entrypoint_storage_driver_pravega_kvs.sh
