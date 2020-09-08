@@ -1,3 +1,4 @@
+ARG BASE_VERSION=4.2.19
 FROM adoptopenjdk/openjdk11:jdk-11.0.4_11
 ADD src ./src/
 ADD gradle ./gradle/

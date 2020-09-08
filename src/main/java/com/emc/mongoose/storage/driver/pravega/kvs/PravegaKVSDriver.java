@@ -37,16 +37,6 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-
-import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -504,12 +494,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val nodeAddr = kvpOp.nodeAddr();
         val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
         val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
-        val kvtNameAndKeyFamily = kvpOp.srcPath().split("/");
-        val kvtName = kvtNameAndKeyFamily[0]; //extractKVTName(kvpOp.srcPath());
-        String kvpKeyFamily = null;
-        if (kvtNameAndKeyFamily.length > 1) {
-            kvpKeyFamily = kvtNameAndKeyFamily[1];
-        }
+
+        val kvtName = extractKVTName(kvpOp.srcPath());
+        val kvpFamily = extractKVFamily(kvpOp.srcPath());
         val kvpKey = kvpOp.item().name();
 
         // create the kvt factory create function if necessary
@@ -523,13 +510,10 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             KVTClientForReadOpCreateFunctionImpl::new);
         KeyValueTable<String, ByteBuffer> kvTable = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
 
-
-        //val family = extractKVFName(key);
-
         if (concurrencyThrottle.tryAcquire()) {
             kvpOp.startRequest();
             // read by key
-            val tableEntryFuture = kvTable.get(/*family*/kvpKeyFamily, /*key*/ kvpKey);
+            val tableEntryFuture = kvTable.get(kvpFamily, kvpKey);
             try {
                 kvpOp.finishRequest();
             } catch (final IllegalStateException ignored) {
@@ -626,7 +610,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         return String.format(super.toString(), PravegaKVSConstants.DRIVER_NAME);
     }
 
-    private static String extractKVTName(final String itemPath) {
+    private static String removeDelimiters(final String itemPath) {
         String kvtName = itemPath;
         if (kvtName.startsWith(SLASH)) {
             kvtName = kvtName.substring(1);
@@ -637,8 +621,13 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         return kvtName;
     }
 
-    private static String extractKVFName(final String itemName) {
-        // TODO
-        return "";
+    private static String extractKVTName(final String itemName) {
+        val kvtNameAndKeyFamily = removeDelimiters(itemName).split(SLASH);
+        return kvtNameAndKeyFamily[0];
+    }
+
+    private static String extractKVFamily(final String itemName) {
+        val kvtNameAndKeyFamily = removeDelimiters(itemName).split(SLASH);
+        return (kvtNameAndKeyFamily.length > 1) ? kvtNameAndKeyFamily[1] : null;
     }
 }
