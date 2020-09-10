@@ -42,7 +42,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
+import java.util.AbstractMap.SimpleEntry;
 
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -426,24 +426,18 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
     protected final int submitMultiKey(final List<O> ops, final int from, final int to)
         throws IllegalStateException {
-
         val anyOp = ops.get(from);
         val opType = anyOp.type();
-        var i = from;
-        Map<String, I> pairs = new HashMap<>();
-        for (O op: ops) {
-            pairs.put(new Entry<String, I>(op.item().name(),op.item()));
-        }
-        //we shouldn't throw away the whole batch
+
+        // we shouldn't throw away the whole batch. question mark.
         switch (opType) {
             case NOOP:
-
                 return to - from;
             case CREATE:
-                for (; i < to && submitCreate(ops.get(i)); i++) ;
+                submitMultiKeyCreate(ops);
                 return to - from;
             case READ:
-                for (; i < to && submitRead(ops.get(i)); i++) ;
+                // submitMultiKeyRead(ops);
                 return to - from;
             default:
                 throw new AssertionError("Unexpected operation type: " + opType);
@@ -458,7 +452,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             submit(ops, 0, ops.size());
     }
 
-    private boolean submitMultiKeyCreate(final List<Map.Entry<String, I>> pairs, final List<O> ops) {
+    private boolean submitMultiKeyCreate(final List<O> ops) {
         val anyOp = ops.get(0);
         val nodeAddr = anyOp.nodeAddr();
         val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
@@ -483,6 +477,11 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val kvpKeyFamily = hashingKeyFunc.apply(anyOp.item());
         // TODO: see if StringBuilder faster
         // TODO: check how affects perf
+        final List<Map.Entry<String, I>> pairs;
+        Map<String, I> pairs = new HashMap<>();
+        for (O op: ops) {
+            pairs.put(new Entry<String, I>(op.item().name(),op.item()));
+        }
         /*val kvpKey = op.item().name();
         if ((null == kvpKeyFamily) || (allowEmptyFamily && kvpKeyFamily.equals("0"))) {
             op.item().name("/" + kvpKey);
@@ -591,6 +590,10 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         try {
             if (null != thrown) {
                 completeOperation(op, FAIL_UNKNOWN);
+            }
+            for (O op: ops) {
+                op.startResponse();
+                pairs.put(new Entry<String, I>(op.item().name(),op.item()));
             }
             op.startResponse();
             op.finishResponse();
