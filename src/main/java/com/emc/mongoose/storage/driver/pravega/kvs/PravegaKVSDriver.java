@@ -361,10 +361,10 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                 case NOOP:
                     return submitNoop(op);
                 case CREATE:
+                case UPDATE:
                     return submitCreate(op);
                 case READ:
                     return submitRead(op);
-                case UPDATE:
                 case DELETE:
                 case LIST:
                 default:
@@ -406,6 +406,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                 for (; i < to && submitNoop(ops.get(i)); i++) ;
                 return i - from;
             case CREATE:
+            case UPDATE:
                 for (; i < to && submitCreate(ops.get(i)); i++) ;
                 return i - from;
             case READ:
