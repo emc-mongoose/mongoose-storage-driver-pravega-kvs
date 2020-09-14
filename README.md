@@ -182,9 +182,9 @@ java -jar mongoose-base-<BASE_VERSION>.jar \
 ## 5.3 Update
 
 To run an update load mongoose needs to know the keys to update which so far can only be provided by specifying 
-`--item-output-path=items.csv` option in create mode. As mongoose uses a fixed seed you need to alter the seed to 
-upload different data. To have a convenient way of setting a new seed for each run learn more about [expression 
-language](https://github.com/emc-mongoose/mongoose-base/blob/master/src/main/java/com/emc/mongoose/base/config/el/README.md).
+`--item-input-path=items.csv` option. To create the file use `--item-output-path=items.csv` in create mode. 
+As mongoose uses a fixed seed you need to alter the seed to upload different data. To have a convenient way of setting 
+a new seed for each run learn more about [expression language](https://github.com/emc-mongoose/mongoose-base/blob/master/src/main/java/com/emc/mongoose/base/config/el/README.md).
 
 ```bash
 java -jar mongoose-base-<BASE_VERSION>.jar \
@@ -199,7 +199,24 @@ java -jar mongoose-base-<BASE_VERSION>.jar \
 ```
 
 ## 5.4 Delete 
-TBD
+
+To run a delete load mongoose needs to know the keys to delete which so far can only be provided by specifying 
+`--item-input-path=items.csv` option. To create the file use `--item-output-path=items.csv` in create mode. 
+One thing to notice: Pravega checks the key sent in the request, if the key exists, Pravega deletes it. If it doesn't, 
+Pravega still says everything's fine, so Mongoose understands that as a successful operation. This way you can delete 
+same N keys an endless amount of times and each time get N successfully finished requests, though the keys were actually only
+deleted the first time.
+
+```bash
+java -jar mongoose-base-<BASE_VERSION>.jar \
+    --load-op-type=delete \
+    --storage-driver-type=pravega-kvs \
+    --storage-namespace=scope1 \
+    --storage-net-node-addrs=<NODE_IP_ADDRS> \
+    --storage-net-node-port=9090 \
+    --item-input-file=items.csv \
+    ...
+```
 
 ## 5.5 Key families
 
