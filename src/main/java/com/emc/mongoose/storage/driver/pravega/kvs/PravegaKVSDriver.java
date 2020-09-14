@@ -366,6 +366,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                     return submitRead(op);
                 case UPDATE:
                 case DELETE:
+                    return submitDelete(op);
                 case LIST:
                 default:
                     throw new AssertionError("\"" + opType + "\" operation isn't implemented");
@@ -410,6 +411,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                 return i - from;
             case READ:
                 for (; i < to && submitRead(ops.get(i)); i++) ;
+                return i - from;
+            case DELETE:
+                for (; i < to && submitDelete(ops.get(i)); i++) ;
                 return i - from;
             default:
                 throw new AssertionError("Unexpected operation type: " + opType);
@@ -547,6 +551,78 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             } else {
                 completeOperation(op, FAIL_UNKNOWN);
             }
+        } finally {
+            concurrencyThrottle.release();
+        }
+        return null;
+    }
+
+    private boolean submitDelete(O op) {
+        val nodeAddr = op.nodeAddr();
+        val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
+        val kvtName = extractKVTName(op.dstPath());
+        val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
+
+        val controller = controllerCache.computeIfAbsent(clientConfig, this::createController);
+        val scopeCreateFunc = scopeCreateFuncCache.computeIfAbsent(controller, ScopeCreateFunctionImpl::new);
+        // create the scope if necessary
+        val kvtCreateFunc = kvtCreateFuncCache.computeIfAbsent(scopeName, scopeCreateFunc);
+        scopeKVTsCache.computeIfAbsent(scopeName, this::createInstanceCache).computeIfAbsent(kvtName, kvtCreateFunc);
+
+        // create the kvt factory create function if necessary
+        val kvtFactoryCreateFunc = kvtFactoryCreateFuncCache.computeIfAbsent(
+            clientConfig,
+            KVTFactoryCreateFunctionImpl::new);
+        // create the kvt factory if necessary
+        val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
+        val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientForCreateOpCreateFunctionImpl::new);
+        //TODO: probably should be thread local
+        KeyValueTable<String, I> kvt = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
+        val kvpKeyFamily = (null != hashingKeyFunc) ? hashingKeyFunc.apply(op.item()) : null;
+        // TODO: see if StringBuilder faster
+        // TODO: check how affects perf
+        val kvpKey = op.item().name();
+        if ((null == kvpKeyFamily) || (allowEmptyFamily && kvpKeyFamily.equals("0"))) {
+            op.item().name("/" + kvpKey);
+        } else {
+            op.item().name(kvpKeyFamily + "/" + kvpKey);
+        }
+        try {
+            val kvpValueSize = op.item().size();
+            if (kvpValueSize > MAX_KVP_VALUE) {
+                completeOperation(op, FAIL_IO);
+                throw new AssertionError(stepId + ": KVP value size cannot exceed 1016KB ");
+            } else if (kvpValueSize < 0) {
+                completeOperation(op, FAIL_IO);
+            } else {
+                if (concurrencyThrottle.tryAcquire()) {
+                    op.startRequest();
+                    val kvtDeleteFuture = kvt.remove(kvpKeyFamily, kvpKey);
+                    try {
+                        op.finishRequest();
+                    } catch (final IllegalStateException ignored) {
+                    }
+                    kvtDeleteFuture.handle((Void, thrown) -> handleDeleteFuture(op, thrown, kvpValueSize));
+                } else {
+                    return false;
+                }
+            }
+        } catch (final IOException e) {
+            throw new AssertionError(e);
+        }
+        return true;
+
+    }
+
+    protected Object handleDeleteFuture(final O op, final Throwable thrown, final long transferSize) {
+        try {
+            if (null != thrown) {
+                completeOperation(op, FAIL_UNKNOWN);
+            }
+            op.startResponse();
+            op.finishResponse();
+            op.countBytesDone(transferSize);
+            completeOperation(op, SUCC);
         } finally {
             concurrencyThrottle.release();
         }
