@@ -320,13 +320,49 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
     private List<I> makeItems(
         final ItemFactory<I> itemFactory, final String path, final String prefix, final int count) throws EOFException {
+        /*
+        * If there is more than one storage node address, then we can use only the first anyway, because
+        * all controllers know (I guess) about all tables and there is no point in polling all nodes.
+        */
+        val nodeAddr = endpointAddrs[0];
+        val endpointUri = endpointCache.computeIfAbsent(nodeAddr, this::createEndpointUri);
+        val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
+
+        val kvtName = extractKVTName(path);
+        val kvpFamily = extractKVFamily(path);
+
+        // create the kvt factory create function if necessary
+        val kvtFactoryCreateFunc = kvtFactoryCreateFuncCache.computeIfAbsent(
+            clientConfig,
+            KVTFactoryCreateFunctionImpl::new);
+        // create the kvt factory if necessary
+        val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
+        val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(
+            kvtFactory,
+            KVTClientForReadOpCreateFunctionImpl::new);
+        KeyValueTable<String, ByteBuffer> kvTable = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
+
+        val keyIterator = kvTable.keyIterator(kvpFamily, count, null);
 
         val items = new ArrayList<I>();
+        while (true){
+            val key = keyIterator.getNext();
+            if (key == null){
+                break;
+            }
+
+//            keyIterator.getNext().handle((version, thrown) -> handleListFuture(kvpOp, tableEntry, thrown))
+//            keyIterator.asIterator().next().getItems().iterator().next().getKey();
+        }
         for (var i = 0; i < count; i++) {
             items.add(itemFactory.getItem(path + SLASH + (prefix == null ? i : prefix + i), 0, 0));
         }
         return items;
     }
+
+//    private void handleListFuture(){
+//
+//    }
 
     @Override
     protected boolean prepare(final O operation) {
