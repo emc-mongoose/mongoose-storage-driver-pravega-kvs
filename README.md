@@ -20,7 +20,11 @@
 &nbsp;&nbsp;&nbsp;&nbsp;4.2.1. [Concurrency](#421-concurrency)<br/>
 &nbsp;&nbsp;&nbsp;&nbsp;4.2.2. [Base Storage Driver Usage Warnings](#422-base-storage-driver-usage-warnings)<br/>
 5. [Usage](#5-usage)<br/>
-TBD
+&nbsp;&nbsp;5.1. [Create](#51-create)<br/>
+&nbsp;&nbsp;5.2. [Read](#52-read)<br/>
+&nbsp;&nbsp;5.3. [Update](#53-update)<br/>
+&nbsp;&nbsp;5.4. [Delete](#54-delete)<br/>
+&nbsp;&nbsp;5.5. [Key families](#55-key-families)<br/>
 6. [Development](#7-development)<br/>
 &nbsp;&nbsp;7.1. [Build](#71-build)<br/>
 &nbsp;&nbsp;7.2. [Test](#72-test)<br/>
@@ -148,7 +152,76 @@ See the [design notes](https://github.com/emc-mongoose/mongoose-storage-driver-c
 
 # 5. Usage
 
-## 5.1 Key families
+## 5.1 Create
+
+```bash
+java -jar mongoose-base-<BASE_VERSION>.jar \
+    --storage-driver-type=pravega-kvs \
+    --storage-namespace=scope1 \
+    --storage-net-node-addrs=<NODE_IP_ADDRS> \
+    --storage-net-node-port=9090 \
+    --item-output-path=items.csv \
+    ...
+```
+
+## 5.2 Read
+
+Right now only the read from file is supported (so the option `--item-output-path=items.csv` is used in create).
+
+```bash
+java -jar mongoose-base-<BASE_VERSION>.jar \
+    --load-op-type=read \
+    --storage-driver-type=pravega-kvs \
+    --storage-namespace=scope1 \
+    --storage-net-node-addrs=<NODE_IP_ADDRS> \
+    --storage-net-node-port=9090 \
+    --item-input-file=items.csv \
+    ...
+```
+
+## 5.3 Update
+
+To run an update load mongoose needs to know the keys to update which so far can only be provided by specifying 
+`--item-input-path=items.csv` option. To create the file use `--item-output-path=items.csv` in create mode. 
+As mongoose uses a fixed seed you need to alter the seed to upload different data. To have a convenient way of setting 
+a new seed for each run learn more about [expression language](https://github.com/emc-mongoose/mongoose-base/blob/master/src/main/java/com/emc/mongoose/base/config/el/README.md).
+
+One thing to notice: Pravega uses same mechanism for creates and updates. So if you update non-existing keys you basically
+create them. There is no way you can pass a key to update and get 404. You should use read mode for that.
+
+```bash
+java -jar mongoose-base-<BASE_VERSION>.jar \
+    --load-op-type=update \
+    --storage-driver-type=pravega-kvs \
+    --storage-namespace=scope1 \
+    --storage-net-node-addrs=<NODE_IP_ADDRS> \
+    --storage-net-node-port=9090 \
+    --item-input-file=items.csv \
+    --item-data-input-seed=7a42d9c482144167 \
+    ...
+```
+
+## 5.4 Delete 
+
+To run a delete load mongoose needs to know the keys to delete which so far can only be provided by specifying 
+`--item-input-path=items.csv` option. To create the file use `--item-output-path=items.csv` in create mode. 
+One thing to notice: Pravega checks the key sent in the request, if the key exists, Pravega deletes it. If it doesn't, 
+Pravega still says everything's fine, so Mongoose understands that as a successful operation. This way you can delete 
+same N keys an endless amount of times and each time get N successfully finished requests, though the keys were actually only
+deleted the first time.
+
+```bash
+java -jar mongoose-base-<BASE_VERSION>.jar \
+    --load-op-type=delete \
+    --storage-driver-type=pravega-kvs \
+    --storage-namespace=scope1 \
+    --storage-net-node-addrs=<NODE_IP_ADDRS> \
+    --storage-net-node-port=9090 \
+    --item-input-file=items.csv \
+    ...
+```
+
+## 5.5 Key families
 
 Key families are disabled by default. 
 
