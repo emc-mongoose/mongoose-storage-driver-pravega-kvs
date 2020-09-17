@@ -42,7 +42,6 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.AbstractMap.SimpleEntry;
 
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -573,12 +572,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         // create the kvt factory if necessary
         val kvtFactory = kvtFactoryCache.computeIfAbsent(scopeName, kvtFactoryCreateFunc);
         val kvtClientCreateFunc = kvtClientCreateFuncCache.computeIfAbsent(kvtFactory, KVTClientForCreateOpCreateFunctionImpl::new);
-        //TODO: probably should be thread local
         KeyValueTable<String, I> kvt = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
         val kvpKeyFamily = hashingKeyFunc.apply(anyOp.item());
-        // TODO: see if StringBuilder faster
-        // TODO: check how affects perf
-        //final List<SimpleEntry<String, I>> pairs = new ArrayList<SimpleEntry<String, I>>();
+
         Map<String, I> pairs = new HashMap<>();
         for (O op : ops) {
             val kvpKey = op.item().name();
@@ -596,6 +592,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                 ioException.printStackTrace();
             }
         }
+        
         if (concurrencyThrottle.tryAcquire()) {
             for (O op : ops) {
                 op.startRequest();
