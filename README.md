@@ -186,6 +186,9 @@ To run an update load mongoose needs to know the keys to update which so far can
 As mongoose uses a fixed seed you need to alter the seed to upload different data. To have a convenient way of setting 
 a new seed for each run learn more about [expression language](https://github.com/emc-mongoose/mongoose-base/blob/master/src/main/java/com/emc/mongoose/base/config/el/README.md).
 
+One thing to notice: Pravega uses same mechanism for creates and updates. So if you update non-existing keys you basically
+create them. There is no way you can pass a key to update and get 404. You should use read mode for that.
+
 ```bash
 java -jar mongoose-base-<BASE_VERSION>.jar \
     --load-op-type=update \

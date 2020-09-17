@@ -487,11 +487,13 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         try {
             if (null != thrown) {
                 completeOperation(op, FAIL_UNKNOWN);
+            } else {
+                op.startResponse();
+                op.finishResponse();
+                op.countBytesDone(transferSize);
+                completeOperation(op, SUCC);
             }
-            op.startResponse();
-            op.finishResponse();
-            op.countBytesDone(transferSize);
-            completeOperation(op, SUCC);
+
         } finally {
             concurrencyThrottle.release();
         }
@@ -543,14 +545,20 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
     private Object handleGetFuture(final O op, final TableEntry<String, ByteBuffer> tableEntry, final Throwable thrown) {
         try {
-            if (null == thrown) {
+            if (null != thrown) {
+                completeOperation(op, FAIL_UNKNOWN);
+            } else {
                 op.startResponse();
                 op.finishResponse();
-                val bytesDone = tableEntry.getValue().remaining();
-                op.countBytesDone(bytesDone);
-                completeOperation(op, SUCC);
-            } else {
-                completeOperation(op, FAIL_UNKNOWN);
+                if (null == tableEntry) {
+                    completeOperation(op, RESP_FAIL_NOT_FOUND);
+                    Loggers.MSG.info(
+                        "Key \"{}\" was not found", op.item().name());
+                } else {
+                    val bytesDone = tableEntry.getValue().remaining();
+                    op.countBytesDone(bytesDone);
+                    completeOperation(op, SUCC);
+                }
             }
         } finally {
             concurrencyThrottle.release();
