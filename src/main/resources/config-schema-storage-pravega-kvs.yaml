@@ -11,6 +11,9 @@ storage:
         count: long
         allow:
           empty: boolean
+    multi:
+      key:
+        enabled: boolean
     scaling:
       partitions: int
   namespace: string
