@@ -157,17 +157,6 @@ task pravegaExtract(dependsOn: pravegaDistInstall) {
 	}
 }
 
-task pravegaExtract2() {
-	doLast {
-		copy {
-			from tarTree("${pravegaSrcDir}${File.separator}build${File.separator}distributions${File.separator}pravega-${pravegaVersion}.tgz")
-			into project.buildDir
-		}
-		def pravegaDir = new File("${project.buildDir}${File.separator}pravega-${pravegaVersion}")
-		pravegaDir.renameTo(pravegaDstDir)
-		pravegaDir.deleteDir()
-	}
-}
 // Mongoose build tasks
 configurations {
 	all {
