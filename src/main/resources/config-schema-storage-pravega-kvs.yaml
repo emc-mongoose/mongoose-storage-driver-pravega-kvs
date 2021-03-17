@@ -1,6 +1,9 @@
 ---
 storage:
   driver:
+    kvp:
+      key:
+        length: int
     control:
       scope: boolean
       kvt: boolean

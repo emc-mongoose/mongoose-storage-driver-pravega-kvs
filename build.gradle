@@ -78,6 +78,7 @@ ext {
 	pravegaSharedAuthpluginJarDir = "${pravegaSrcDir}${File.separator}shared${File.separator}authplugin${File.separator}${buildLibsPath}"
 	pravegaSharedControllerApiJarDir = "${pravegaSrcDir}${File.separator}shared${File.separator}controller-api${File.separator}${buildLibsPath}"
 	pravegaSharedProtocolJarDir = "${pravegaSrcDir}${File.separator}shared${File.separator}protocol${File.separator}${buildLibsPath}"
+	pravegaSharedSecurityJarDir = "${pravegaSrcDir}${File.separator}shared${File.separator}security${File.separator}${buildLibsPath}"
 }
 wrapper {
 	gradleVersion = "6.4"
@@ -98,8 +99,12 @@ task clonePravegaRepo {
 		}
 		if(!destDir.exists()) {
 			def gitRepo = Grgit.clone {
-				uri = "https://github.com/pravega/pravega.git"
+				uri = "https://github.com/andreipaduroiu/pravega.git"
 				dir = pravegaSrcDir
+			}
+			gitRepo.branch.add(name: branchName, startPoint: 'origin/poc-fixed-table-keys-throttled', mode: 'TRACK')
+			gitRepo.checkout {
+				branch = branchName
 			}
 			gitRepo.reset {
 				commit = pravegaCommit
@@ -151,6 +156,7 @@ task pravegaExtract(dependsOn: pravegaDistInstall) {
 		pravegaDir.deleteDir()
 	}
 }
+
 // Mongoose build tasks
 configurations {
 	all {
@@ -196,6 +202,8 @@ dependencies {
 			"${pravegaSharedAuthpluginJarDir}${File.separator}pravega-shared-authplugin-${pravegaVersion}.jar",
 			"${pravegaSharedControllerApiJarDir}${File.separator}pravega-shared-controller-api-${pravegaVersion}.jar",
 			"${pravegaSharedProtocolJarDir}${File.separator}pravega-shared-protocol-${pravegaVersion}.jar",
+			"${pravegaSharedSecurityJarDir}${File.separator}pravega-shared-security-${pravegaVersion}.jar"
+
 		),
 		"com.google.guava:guava:${depVersion.guava}",
 		"com.google.protobuf:protobuf-java:${depVersion.protobuf}",
