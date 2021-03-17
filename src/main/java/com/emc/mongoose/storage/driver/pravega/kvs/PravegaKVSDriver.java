@@ -68,6 +68,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     protected final int nodePort;
     protected final int maxConnectionsPerSegmentstore;
     protected final int partitionCount;
+    protected final int kvpKeyLength;
     protected final long controlApiTimeoutMillis;
     private final HashingKeyFunction<I> hashingKeyFunc;
     private final boolean controlScopeFlag;
@@ -130,6 +131,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         public final KeyValueTableConfiguration apply(final String kvtName) {
             KeyValueTableConfiguration kvtConfig = KeyValueTableConfiguration.builder()
                 .partitionCount(partitionCount)
+                .keyLength(kvpKeyLength)
                 .build();
             if (controlKVTFlag) {
                 try {
@@ -180,7 +182,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         public final KeyValueTable apply(final String kvtName) {
             val kvtConfig = KeyValueTableClientConfiguration.builder()
                 .build();
-            return kvtFactory.forKeyValueTable(kvtName, new UTF8StringSerializer(),
+            return kvtFactory.forKeyValueTableFixedKeyLength(kvtName, new UTF8StringSerializer(),
                 new DataItemSerializer(false, false), kvtConfig);
         }
     }
@@ -195,7 +197,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         public final KeyValueTable apply(final String kvtName) {
             val kvtConfig = KeyValueTableClientConfiguration.builder()
                 .build();
-            return kvtFactory.forKeyValueTable(kvtName, new UTF8StringSerializer(), new ByteBufferSerializer(), kvtConfig);
+            return kvtFactory.forKeyValueTableFixedKeyLength(kvtName, new UTF8StringSerializer(), new ByteBufferSerializer(), kvtConfig);
         }
     }
 
@@ -215,9 +217,10 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         final boolean verifyFlag,
         final int batchSize
     ) throws IllegalConfigurationException, IllegalArgumentException {
-        super(stepId, dataInput, storageConfig, verifyFlag, batchSize); //TODO: pass 1 or batchSize depending on
-        //whether we work with a single KVP or with a batch
+        // TODO: pass 1 or batchSize depending on whether we work with a single KVP or with a batch
+        super(stepId, dataInput, storageConfig, verifyFlag, batchSize);
         val driverConfig = storageConfig.configVal("driver");
+        kvpKeyLength = driverConfig.intVal("kvp-key-length");
         val createConfig = driverConfig.configVal("create");
         val controlConfig = driverConfig.configVal("control");
         this.controlApiTimeoutMillis = controlConfig.longVal("timeoutMillis");

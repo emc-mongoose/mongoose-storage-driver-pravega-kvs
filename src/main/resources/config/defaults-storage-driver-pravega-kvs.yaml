@@ -1,6 +1,9 @@
 ---
 storage:
   driver:
+    kvp:
+      key:
+        length: 12
     control:
       scope: true
       kvt: true
