@@ -106,10 +106,10 @@ task clonePravegaRepo {
 			gitRepo.checkout {
 				branch = branchName
 			}
-			gitRepo.reset {
+			/*gitRepo.reset {
 				commit = pravegaCommit
 				mode = "hard"
-			}
+			}*/
 		}
 	}
 }
