@@ -21,6 +21,8 @@ import com.emc.mongoose.storage.driver.pravega.kvs.io.DataItemSerializer;
 import com.github.akurilov.confuse.Config;
 import io.pravega.client.ClientConfig;
 import io.pravega.client.KeyValueTableFactory;
+import io.pravega.client.admin.KeyValueTableManager;
+import io.pravega.client.admin.impl.KeyValueTableManagerImpl;
 import io.pravega.client.control.impl.Controller;
 import io.pravega.client.control.impl.ControllerImpl;
 import io.pravega.client.control.impl.ControllerImplConfig;
@@ -31,6 +33,7 @@ import io.pravega.client.tables.KeyValueTableConfiguration;
 import io.pravega.client.tables.TableEntry;
 import lombok.Value;
 import lombok.val;
+import org.apache.commons.lang.RandomStringUtils;
 import org.apache.logging.log4j.Level;
 
 import java.io.EOFException;
@@ -79,30 +82,35 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     private final boolean useMultiKeyOperations;
 
     // caches allowing the lazy creation of the necessary things:
-    private final Map<Controller, ScopeCreateFunction> scopeCreateFuncCache = new ConcurrentHashMap<>();
+    // in pravega driver controller is still in charge for creating streams. in kvs we cannot use controller anymore as
+    // there are important checks done in kvtManager. But because we are using Function interface we can only pass one
+    // parameter to apply method that this interface provides, so it has to be a map.entry as we need both scope and kvt names.
+    private final Map<Map.Entry<Controller, KeyValueTableManager>, ScopeCreateFunction> scopeCreateFuncCache = new ConcurrentHashMap<>();
+    // create functions are a necessary step. We use map.createIfAbsent for caching. And this method only allows
+    // to pass one parameter to a mapping function. When you need more you need to use create functions
     private final Map<String, KVTCreateFunction> kvtCreateFuncCache = new ConcurrentHashMap<>();
     private final Map<ClientConfig, KVTFactoryCreateFunction> kvtFactoryCreateFuncCache = new ConcurrentHashMap<>();
     private final Map<KeyValueTableFactory, KVTClientCreateFunction> kvtClientCreateFuncCache = new ConcurrentHashMap<>();
-    //TODO: describe why we introduce create functions not don't simple use a method (2 parameters)
     private final Map<String, URI> endpointCache = new ConcurrentHashMap<>();
     private final Map<URI, ClientConfig> clientConfigCache = new ConcurrentHashMap<>();
     private final Map<ClientConfig, Controller> controllerCache = new ConcurrentHashMap<>();
+    private final Map<ClientConfig, KeyValueTableManager> kvtManagerCache = new ConcurrentHashMap<>();
+    // for each scope we store a map of KVTs in this scope as well as KVT config.
     private final Map<String, Map<String, KeyValueTableConfiguration>> scopeKVTsCache = new ConcurrentHashMap<>();
     private final Map<String, KeyValueTableFactory> kvtFactoryCache = new ConcurrentHashMap<>();
     private final Map<String, KeyValueTable> kvtCache = new ConcurrentHashMap<>();
-
 
     @Value
     final class ScopeCreateFunctionImpl
         implements ScopeCreateFunction {
 
-        Controller controller;
+        Map.Entry<Controller, KeyValueTableManager> controllerAndManager;
 
         @Override
         public final KVTCreateFunction apply(final String scopeName) {
             if (controlScopeFlag) {
                 try {
-                    if (controller.createScope(scopeName).get(controlApiTimeoutMillis, MILLISECONDS)) {
+                    if (controllerAndManager.getKey().createScope(scopeName).get(controlApiTimeoutMillis, MILLISECONDS)) {
                         Loggers.MSG.trace("Scope \"{}\" was created", scopeName);
                     } else {
                         Loggers.MSG.info(
@@ -116,7 +124,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                     );
                 }
             }
-            return new KVTCreateFunctionImpl(controller, scopeName);
+            return new KVTCreateFunctionImpl(controllerAndManager, scopeName);
         }
     }
 
@@ -124,7 +132,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     final class KVTCreateFunctionImpl
         implements KVTCreateFunction {
 
-        Controller controller;
+        Map.Entry<Controller, KeyValueTableManager> controllerAndManager;
         String scopeName;
 
         @Override
@@ -135,8 +143,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                 .build();
             if (controlKVTFlag) {
                 try {
-                    val createKVTFuture = controller.createKeyValueTable(scopeName, kvtName, kvtConfig);
-                    if (createKVTFuture.get(controlApiTimeoutMillis, MILLISECONDS)) {
+                    if (controllerAndManager.getValue().createKeyValueTable(scopeName, kvtName, kvtConfig)) {
                         Loggers.MSG.trace(
                             "KVT \"{}/{}\" was created using the config: {}",
                             scopeName,
@@ -149,8 +156,6 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                         //scaleToPartitionCount(
                         //        controller, controlApiTimeoutMillis, scopeName, kvtName, scalingPolicy);
                     }
-                } catch (final InterruptedException e) {
-                    throwUnchecked(e);
                 } catch (final Throwable cause) {
                     LogUtil.exception(
                         Level.WARN, cause, "{}: failed to create the KVT \"{}\"", stepId, kvtName);
@@ -208,6 +213,10 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
             .maxBackoffMillis(MAX_BACKOFF_MILLIS)
             .build();
         return new ControllerImpl(controllerConfig, bgExecutor);
+    }
+
+    private KeyValueTableManager createKVTManager(final ClientConfig clientConfig) {
+       return new KeyValueTableManagerImpl(clientConfig);
     }
 
     PravegaKVSDriver(
@@ -489,7 +498,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
 
         val controller = controllerCache.computeIfAbsent(clientConfig, this::createController);
-        val scopeCreateFunc = scopeCreateFuncCache.computeIfAbsent(controller, ScopeCreateFunctionImpl::new);
+        val kvtManager = kvtManagerCache.computeIfAbsent(clientConfig, this::createKVTManager);
+        val scopeCreateFunc = scopeCreateFuncCache.computeIfAbsent(Map.entry(controller, kvtManager),
+                ScopeCreateFunctionImpl::new);
         // create the scope if necessary
         val kvtCreateFunc = kvtCreateFuncCache.computeIfAbsent(scopeName, scopeCreateFunc);
         scopeKVTsCache.computeIfAbsent(scopeName, this::createInstanceCache).computeIfAbsent(kvtName, kvtCreateFunc);
@@ -504,9 +515,10 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         //TODO: probably should be thread local
         KeyValueTable<String, I> kvt = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
         val kvpKeyFamily = (null != hashingKeyFunc) ? hashingKeyFunc.apply(op.item()) : null;
+        // TODO: check how affects perf
+        val kvpKey = RandomStringUtils.randomAlphanumeric(kvpKeyLength);
         // TODO: see if StringBuilder faster
         // TODO: check how affects perf
-        val kvpKey = op.item().name();
         if ((null == kvpKeyFamily) || (allowEmptyFamily && kvpKeyFamily.equals("0"))) {
             op.item().name("/" + kvpKey);
         } else {
@@ -563,8 +575,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
 
         val controller = controllerCache.computeIfAbsent(clientConfig, this::createController);
-        val scopeCreateFunc = scopeCreateFuncCache.computeIfAbsent(controller, ScopeCreateFunctionImpl::new);
-        // create the scope if necessary
+        val kvtManager = kvtManagerCache.computeIfAbsent(clientConfig, this::createKVTManager);
+        val scopeCreateFunc = scopeCreateFuncCache.computeIfAbsent(Map.entry(controller, kvtManager), ScopeCreateFunctionImpl::new);// create the scope if necessary
         val kvtCreateFunc = kvtCreateFuncCache.computeIfAbsent(scopeName, scopeCreateFunc);
         scopeKVTsCache.computeIfAbsent(scopeName, this::createInstanceCache).computeIfAbsent(kvtName, kvtCreateFunc);
 
@@ -580,7 +592,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
 
         Map<String, I> pairs = new HashMap<>();
         for (O op : ops) {
-            val kvpKey = op.item().name();
+            val kvpKey = RandomStringUtils.randomAlphanumeric(kvpKeyLength);
             pairs.put(kvpKey, op.item());
             op.item().name(kvpKeyFamily + "/" + kvpKey);
             try {
@@ -708,8 +720,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         val clientConfig = clientConfigCache.computeIfAbsent(endpointUri, this::createClientConfig);
 
         val controller = controllerCache.computeIfAbsent(clientConfig, this::createController);
-        val scopeCreateFunc = scopeCreateFuncCache.computeIfAbsent(controller, ScopeCreateFunctionImpl::new);
-        // create the scope if necessary
+        val kvtManager = kvtManagerCache.computeIfAbsent(clientConfig, this::createKVTManager);
+        val scopeCreateFunc = scopeCreateFuncCache.computeIfAbsent(Map.entry(controller, kvtManager), ScopeCreateFunctionImpl::new);// create the scope if necessary
         val kvtCreateFunc = kvtCreateFuncCache.computeIfAbsent(scopeName, scopeCreateFunc);
         scopeKVTsCache.computeIfAbsent(scopeName, this::createInstanceCache).computeIfAbsent(kvtName, kvtCreateFunc);
 
