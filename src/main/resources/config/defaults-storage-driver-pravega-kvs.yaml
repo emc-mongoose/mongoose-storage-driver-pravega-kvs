@@ -3,7 +3,9 @@ storage:
   driver:
     kvp:
       key:
-        length: 12
+        length: 16
+        sequential: false
+        radix: 36
     control:
       scope: true
       kvt: true

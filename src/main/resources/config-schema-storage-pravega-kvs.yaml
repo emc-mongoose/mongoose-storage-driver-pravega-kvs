@@ -4,6 +4,8 @@ storage:
     kvp:
       key:
         length: int
+        sequential: boolean
+        radix: int
     control:
       scope: boolean
       kvt: boolean

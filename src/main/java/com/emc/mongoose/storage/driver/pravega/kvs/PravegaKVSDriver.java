@@ -38,10 +38,12 @@ import org.apache.logging.log4j.Level;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +55,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static com.emc.mongoose.base.Exceptions.throwUncheckedIfInterrupted;
 import static com.emc.mongoose.base.item.op.Operation.SLASH;
@@ -72,6 +76,9 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     protected final int maxConnectionsPerSegmentstore;
     protected final int partitionCount;
     protected final int kvpKeyLength;
+    protected final int kvpKeyRadix;
+    // for sequential keys we need to have a common seed from which we can derive a kvp key name
+    protected volatile BigInteger kvpNamingSeed;
     protected final long controlApiTimeoutMillis;
     private final HashingKeyFunction<I> hashingKeyFunc;
     private final boolean controlScopeFlag;
@@ -80,6 +87,8 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
     private final AtomicInteger rrc = new AtomicInteger(0);
     private final boolean allowEmptyFamily;
     private final boolean useMultiKeyOperations;
+    private final boolean kvpKeysSequentialMode;
+    private final Lock kvpNamingSeedLock = new ReentrantLock();
 
     // caches allowing the lazy creation of the necessary things:
     // in pravega driver controller is still in charge for creating streams. in kvs we cannot use controller anymore as
@@ -229,7 +238,20 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         // TODO: pass 1 or batchSize depending on whether we work with a single KVP or with a batch
         super(stepId, dataInput, storageConfig, verifyFlag, batchSize);
         val driverConfig = storageConfig.configVal("driver");
-        kvpKeyLength = driverConfig.intVal("kvp-key-length");
+        val kvpKeyConfig = driverConfig.configVal("kvp-key");
+        kvpKeyLength = kvpKeyConfig.intVal("length");
+        kvpKeyRadix = kvpKeyConfig.intVal("radix");
+        // in case we need sequential keys, driver generates 1000...0 BigInteger in radix 36
+        // and each operation updates it by 1. And then converts it to String
+        // it's somewhat similar to itemName generation but a lot slower due to BigInteger class
+        // instead of primitive types
+        // it's user's responsibility to set the right item limit so that the length doesn't increase
+        // the default config provides us with 7,738*10^24 (35 * 36 ^ (16-1)) possible item names
+        kvpKeysSequentialMode = kvpKeyConfig.boolVal("sequential");
+        if (kvpKeysSequentialMode) {
+            kvpNamingSeed = new BigInteger("1" + "0".repeat(kvpKeyLength - 1), kvpKeyRadix);
+        }
+
         val createConfig = driverConfig.configVal("create");
         val controlConfig = driverConfig.configVal("control");
         this.controlApiTimeoutMillis = controlConfig.longVal("timeoutMillis");
@@ -516,7 +538,22 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
         KeyValueTable<String, I> kvt = kvtCache.computeIfAbsent(kvtName, kvtClientCreateFunc);
         val kvpKeyFamily = (null != hashingKeyFunc) ? hashingKeyFunc.apply(op.item()) : null;
         // TODO: check how affects perf
-        val kvpKey = RandomStringUtils.randomAlphanumeric(kvpKeyLength);
+        String kvpKey = null;
+        if (kvpKeysSequentialMode) {
+            kvpNamingSeedLock.lock();
+            try {
+                kvpKey = kvpNamingSeed.toString(kvpKeyRadix);
+                kvpNamingSeed = kvpNamingSeed.add(BigInteger.ONE);
+            } catch( final ConcurrentModificationException ignored){
+            } catch( final Throwable cause){
+                throwUncheckedIfInterrupted(cause);
+                LogUtil.exception(Level.DEBUG, cause, "kvp key seed modification failure");
+            } finally {
+                kvpNamingSeedLock.unlock();
+            }
+        } else {
+            kvpKey = RandomStringUtils.randomAlphanumeric(kvpKeyLength);;
+        }
         // TODO: see if StringBuilder faster
         // TODO: check how affects perf
         if ((null == kvpKeyFamily) || (allowEmptyFamily && kvpKeyFamily.equals("0"))) {
@@ -607,7 +644,7 @@ public class PravegaKVSDriver<I extends DataItem, O extends DataOperation<I>>
                 ioException.printStackTrace();
             }
         }
-        
+
         if (concurrencyThrottle.tryAcquire()) {
             for (O op : ops) {
                 op.startRequest();
